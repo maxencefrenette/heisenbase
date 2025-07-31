@@ -4,6 +4,8 @@ use shakmaty::{CastlingMode, Chess, FromSetup, Piece, Position, Setup, Square};
 
 /// A DTZ score.
 ///
+/// This score is from the perspective of the side to move.
+///
 /// +99 means the side to move wins and has a zeroing move immediately available
 /// +1 means the side to move wins and has a zeroing move in 100 halfmoves
 /// 0 means the side to move draws
@@ -14,12 +16,8 @@ use shakmaty::{CastlingMode, Chess, FromSetup, Piece, Position, Setup, Square};
 struct DtzScore(i8);
 
 impl DtzScore {
-    fn new(score: i8) -> Self {
-        Self(score)
-    }
-
     fn immediate_win() -> Self {
-        Self(100)
+        Self(99)
     }
 
     fn immediate_loss() -> Self {
