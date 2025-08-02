@@ -63,16 +63,12 @@ impl TableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shakmaty::{CastlingMode, Piece, fen::Fen};
+    use shakmaty::{CastlingMode, fen::Fen};
 
     #[test]
     fn position_index_roundtrip() {
         let tb = TableBuilder {
-            material: MaterialKey::new(vec![
-                Piece::from_char('K').unwrap(),
-                Piece::from_char('Q').unwrap(),
-                Piece::from_char('k').unwrap(),
-            ]),
+            material: MaterialKey::from_string("KQvK").unwrap(),
             positions: Vec::new(),
         };
 

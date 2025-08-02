@@ -1,5 +1,4 @@
 use std::fmt;
-use std::ops::Deref;
 
 use shakmaty::{CastlingMode, Chess, Color, FromSetup, Piece, Position, Role, Setup, Square};
 
@@ -11,17 +10,33 @@ use shakmaty::{CastlingMode, Chess, Color, FromSetup, Piece, Position, Role, Set
 /// unique square. Illegal arrangements, such as overlapping pieces or
 /// duplicate-piece ambiguity, are considered invalid and are never assigned an
 /// index.
+const ROLES: [Role; 6] = [
+    Role::King,
+    Role::Queen,
+    Role::Rook,
+    Role::Bishop,
+    Role::Knight,
+    Role::Pawn,
+];
+
+fn role_index(role: Role) -> usize {
+    match role {
+        Role::King => 0,
+        Role::Queen => 1,
+        Role::Rook => 2,
+        Role::Bishop => 3,
+        Role::Knight => 4,
+        Role::Pawn => 5,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaterialKey {
-    pieces: Vec<Piece>,
+    /// Piece counts indexed by color then role.
+    counts: [[u8; 6]; 2],
 }
 
 impl MaterialKey {
-    /// Create a new material key from a list of pieces.
-    pub fn new(pieces: Vec<Piece>) -> Self {
-        Self { pieces }
-    }
-
     /// Parse a [`MaterialKey`] from its textual representation.
     ///
     /// # Syntax
@@ -52,9 +67,13 @@ impl MaterialKey {
             return None;
         }
 
-        let mut pieces = Vec::new();
+        let mut counts = [[0u8; 6]; 2];
 
-        fn push_pieces(out: &mut Vec<Piece>, chars: &str, color: Color) -> Option<()> {
+        fn push_pieces(out: &mut [[u8; 6]; 2], chars: &str, color: Color) -> Option<()> {
+            let color_idx = match color {
+                Color::White => 0,
+                Color::Black => 1,
+            };
             for ch in chars.chars() {
                 let role = match ch {
                     'K' => Role::King,
@@ -65,17 +84,16 @@ impl MaterialKey {
                     'P' => Role::Pawn,
                     _ => return None,
                 };
-
-                out.push(Piece { role, color });
+                let role_idx = role_index(role);
+                out[color_idx][role_idx] += 1;
             }
-
             Some(())
         }
 
-        push_pieces(&mut pieces, white, Color::White)?;
-        push_pieces(&mut pieces, black, Color::Black)?;
+        push_pieces(&mut counts, white, Color::White)?;
+        push_pieces(&mut counts, black, Color::Black)?;
 
-        Some(Self::new(pieces))
+        Some(Self { counts })
     }
 
     /// Total number of mappable positions for this material configuration.
@@ -84,7 +102,7 @@ impl MaterialKey {
     /// on distinct squares. Since squares cannot be reused, the total count is
     /// `64 * 63 * 62 * ...` for as many pieces as are in the key.
     pub fn total_positions(&self) -> usize {
-        (0..self.len()).fold(1, |acc, i| acc * (64 - i))
+        (0..self.piece_count()).fold(1, |acc, i| acc * (64 - i))
     }
 
     /// Convert an index into a [`Chess`] position.
@@ -100,12 +118,13 @@ impl MaterialKey {
         let mut setup = Setup::empty();
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
-        for piece in self.iter() {
+        let pieces = self.pieces();
+        for piece in pieces {
             let base = squares.len();
             let idx = pos_index % base;
             pos_index /= base;
             let square = squares.remove(idx);
-            setup.board.set_piece_at(square, *piece);
+            setup.board.set_piece_at(square, piece);
         }
 
         Chess::from_setup(setup, CastlingMode::Standard).ok()
@@ -122,9 +141,10 @@ impl MaterialKey {
         let mut multiplier = 1usize;
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
-        for piece in self.iter() {
+        let pieces = self.pieces();
+        for piece in pieces {
             let base = squares.len();
-            let square = position.board().by_piece(*piece).first().unwrap();
+            let square = position.board().by_piece(piece).first().unwrap();
             let idx = squares
                 .iter()
                 .position(|&s| s == square)
@@ -138,47 +158,52 @@ impl MaterialKey {
     }
 }
 
-impl Deref for MaterialKey {
-    type Target = [Piece];
-
-    fn deref(&self) -> &Self::Target {
-        &self.pieces
-    }
-}
-
 impl fmt::Display for MaterialKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut white: Vec<char> = Vec::new();
-        let mut black: Vec<char> = Vec::new();
+        for color_idx in 0..2 {
+            if color_idx == 1 {
+                write!(f, "v")?;
+            }
 
-        for piece in &self.pieces {
-            let ch = match piece.role {
-                Role::King => 'K',
-                Role::Queen => 'Q',
-                Role::Rook => 'R',
-                Role::Bishop => 'B',
-                Role::Knight => 'N',
-                Role::Pawn => 'P',
-            };
-
-            if piece.color == Color::White {
-                white.push(ch);
-            } else {
-                black.push(ch);
+            for (ch, role) in [
+                ('K', Role::King),
+                ('Q', Role::Queen),
+                ('R', Role::Rook),
+                ('B', Role::Bishop),
+                ('N', Role::Knight),
+                ('P', Role::Pawn),
+            ] {
+                for _ in 0..self.counts[color_idx][role_index(role)] {
+                    write!(f, "{}", ch)?;
+                }
             }
         }
 
-        for c in white {
-            write!(f, "{}", c)?;
-        }
-
-        write!(f, "v")?;
-
-        for c in black {
-            write!(f, "{}", c)?;
-        }
-
         Ok(())
+    }
+}
+
+impl MaterialKey {
+    /// Number of pieces in this key.
+    fn piece_count(&self) -> usize {
+        self.counts
+            .iter()
+            .map(|c| c.iter().map(|&n| n as usize).sum::<usize>())
+            .sum()
+    }
+
+    /// Expand the piece counts into a vector of pieces in a canonical order.
+    fn pieces(&self) -> Vec<Piece> {
+        let mut pieces = Vec::with_capacity(self.piece_count());
+        for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
+            for &role in &ROLES {
+                let count = self.counts[color_idx][role_index(role)];
+                for _ in 0..count {
+                    pieces.push(Piece { role, color });
+                }
+            }
+        }
+        pieces
     }
 }
 
@@ -186,19 +211,11 @@ impl fmt::Display for MaterialKey {
 mod tests {
     use super::*;
     use rand::{Rng, SeedableRng, rngs::StdRng};
-    use shakmaty::Piece;
 
     #[test]
     fn parses_kqvk() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(
-            mk,
-            MaterialKey::new(vec![
-                Piece::from_char('K').unwrap(),
-                Piece::from_char('Q').unwrap(),
-                Piece::from_char('k').unwrap(),
-            ])
-        );
+        assert_eq!(mk.to_string(), "KQvK");
     }
 
     #[test]
