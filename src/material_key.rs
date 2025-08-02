@@ -81,34 +81,31 @@ impl MaterialKey {
     /// Total number of mappable positions for this material configuration.
     ///
     /// Each index corresponds to a unique permutation where all pieces appear
-    /// on distinct squares. Invalid permutations that would place multiple
-    /// pieces on the same square are skipped and receive no index.
+    /// on distinct squares. Since squares cannot be reused, the total count is
+    /// `64 * 63 * 62 * ...` for as many pieces as are in the key.
     pub fn total_positions(&self) -> usize {
-        64usize.pow(self.len() as u32)
+        (0..self.len()).fold(1, |acc, i| acc * (64 - i))
     }
 
     /// Convert an index into a [`Chess`] position.
     ///
-    /// Returns `None` when the index refers to an illegal placement, such as
-    /// two pieces occupying the same square or duplicated material that is not
-    /// yet supported. Only indices for legal permutations yield a position.
-    ///
-    /// TODO:
-    /// Don't assign indices to invalid positions.
-    /// Add support for duplicated material (e.g. 2 knights)
+    /// Returns `None` only when the index exceeds the number of mappable
+    /// positions. Every index less than [`total_positions`](Self::total_positions)
+    /// yields a unique placement with all pieces on distinct squares.
     pub fn index_to_position(&self, mut pos_index: usize) -> Option<Chess> {
+        if pos_index >= self.total_positions() {
+            return None;
+        }
+
         let mut setup = Setup::empty();
+        let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
         for piece in self.iter() {
-            let index = pos_index % 64;
-            let square = Square::new(index as u32);
-
-            if setup.board.piece_at(square).is_some() {
-                return None;
-            }
-
+            let base = squares.len();
+            let idx = pos_index % base;
+            pos_index /= base;
+            let square = squares.remove(idx);
             setup.board.set_piece_at(square, *piece);
-            pos_index /= 64;
         }
 
         Chess::from_setup(setup, CastlingMode::Standard).ok()
@@ -121,11 +118,20 @@ impl MaterialKey {
     /// distinct square. Positions that violate this requirement are outside the
     /// mapping and result in undefined behaviour.
     pub fn position_to_index(&self, position: &Chess) -> usize {
-        let mut index = 0;
+        let mut index = 0usize;
+        let mut multiplier = 1usize;
+        let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
-        for piece in self.iter().rev() {
+        for piece in self.iter() {
+            let base = squares.len();
             let square = position.board().by_piece(*piece).first().unwrap();
-            index = index * 64 + square.to_usize();
+            let idx = squares
+                .iter()
+                .position(|&s| s == square)
+                .expect("piece square must exist");
+            index += idx * multiplier;
+            squares.remove(idx);
+            multiplier *= base;
         }
 
         index
@@ -203,6 +209,12 @@ mod tests {
     #[test]
     fn rejects_missing_separator() {
         assert!(MaterialKey::from_string("KQK").is_none());
+    }
+
+    #[test]
+    fn total_positions_without_overlap() {
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        assert_eq!(mk.total_positions(), 64 * 63 * 62);
     }
 
     fn roundtrip_random_indices(mk: MaterialKey, seed: u64) {
