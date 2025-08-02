@@ -221,3 +221,32 @@ impl TableBuilder {
         index
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shakmaty::fen::Fen;
+
+    #[test]
+    fn position_index_roundtrip() {
+        let tb = TableBuilder {
+            material: vec![
+                Piece::from_char('K').unwrap(),
+                Piece::from_char('Q').unwrap(),
+                Piece::from_char('k').unwrap(),
+            ],
+            positions: Vec::new(),
+        };
+
+        let position = "7k/8/8/8/8/8/8/KQ6 w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+
+        let index = tb.position_to_index(&position);
+        let reconstructed = tb.index_to_position(index).expect("valid position");
+
+        assert_eq!(tb.position_to_index(&reconstructed), index);
+    }
+}
