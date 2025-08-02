@@ -1,3 +1,4 @@
+mod score;
 mod table_builder;
 
 use shakmaty::Piece;
