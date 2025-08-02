@@ -22,6 +22,62 @@ impl MaterialKey {
         Self { pieces }
     }
 
+    /// Parse a [`MaterialKey`] from its textual representation.
+    ///
+    /// # Syntax
+    /// The expected form is `<white pieces>v<black pieces>`, where each side is
+    /// a sequence of piece characters and exactly one `v` separates the two
+    /// sides.
+    ///
+    /// # Piece characters and colors
+    /// Supported characters are `K`, `Q`, `R`, `B`, `N` and `P` for king,
+    /// queen, rook, bishop, knight and pawn respectively. All characters must
+    /// be uppercase. Pieces appearing before the separator are interpreted as
+    /// white, while those after it are treated as black.
+    ///
+    /// # Use cases
+    /// This is primarily useful for tests and simple user interfaces that need
+    /// to describe a set of pieces without board coordinates.
+    ///
+    /// # Errors
+    /// Returns `None` if the string is malformed, contains unsupported
+    /// characters, has a missing or extra separator, or is otherwise ambiguous.
+    pub fn from_string(s: &str) -> Option<Self> {
+        let mut parts = s.split('v');
+        let white = parts.next()?;
+        let black = parts.next()?;
+
+        // Only one separator is allowed.
+        if parts.next().is_some() {
+            return None;
+        }
+
+        let mut pieces = Vec::new();
+
+        fn push_pieces(out: &mut Vec<Piece>, chars: &str, color: Color) -> Option<()> {
+            for ch in chars.chars() {
+                let role = match ch {
+                    'K' => Role::King,
+                    'Q' => Role::Queen,
+                    'R' => Role::Rook,
+                    'B' => Role::Bishop,
+                    'N' => Role::Knight,
+                    'P' => Role::Pawn,
+                    _ => return None,
+                };
+
+                out.push(Piece { role, color });
+            }
+
+            Some(())
+        }
+
+        push_pieces(&mut pieces, white, Color::White)?;
+        push_pieces(&mut pieces, black, Color::Black)?;
+
+        Some(Self::new(pieces))
+    }
+
     /// Total number of mappable positions for this material configuration.
     ///
     /// Each index corresponds to a unique permutation where all pieces appear
@@ -117,5 +173,34 @@ impl fmt::Display for MaterialKey {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shakmaty::Piece;
+
+    #[test]
+    fn parses_kqvk() {
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        assert_eq!(
+            mk,
+            MaterialKey::new(vec![
+                Piece::from_char('K').unwrap(),
+                Piece::from_char('Q').unwrap(),
+                Piece::from_char('k').unwrap(),
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_char() {
+        assert!(MaterialKey::from_string("KXvK").is_none());
+    }
+
+    #[test]
+    fn rejects_missing_separator() {
+        assert!(MaterialKey::from_string("KQK").is_none());
     }
 }
