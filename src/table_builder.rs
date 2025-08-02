@@ -70,12 +70,12 @@ impl SubAssign<i8> for DtzScore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ScoreRange {
+struct DtzScoreRange {
     pub min: DtzScore,
     pub max: DtzScore,
 }
 
-impl ScoreRange {
+impl DtzScoreRange {
     pub fn unknown() -> Self {
         Self {
             min: DtzScore::immediate_loss(),
@@ -126,7 +126,7 @@ impl ScoreRange {
 
 pub struct TableBuilder {
     material: Vec<Piece>,
-    positions: Vec<ScoreRange>,
+    positions: Vec<DtzScoreRange>,
 }
 
 impl TableBuilder {
@@ -135,7 +135,7 @@ impl TableBuilder {
 
         Self {
             material,
-            positions: vec![ScoreRange::unknown(); positions],
+            positions: vec![DtzScoreRange::unknown(); positions],
         }
     }
 
@@ -156,12 +156,12 @@ impl TableBuilder {
             // If the position is invalid, skip it.
             if let Some(position) = position {
                 if position.is_checkmate() {
-                    self.positions[pos_index] = ScoreRange::checkmate();
+                    self.positions[pos_index] = DtzScoreRange::checkmate();
                     continue;
                 }
 
                 if position.is_stalemate() || position.is_insufficient_material() {
-                    self.positions[pos_index] = ScoreRange::draw();
+                    self.positions[pos_index] = DtzScoreRange::draw();
                     continue;
                 }
 
