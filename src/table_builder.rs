@@ -1,13 +1,14 @@
+use crate::material_key::MaterialKey;
 use crate::score::DtzScoreRange;
 use shakmaty::{CastlingMode, Chess, FromSetup, Piece, Position, Setup, Square};
 
 pub struct TableBuilder {
-    material: Vec<Piece>,
+    material: MaterialKey,
     positions: Vec<DtzScoreRange>,
 }
 
 impl TableBuilder {
-    pub fn new(material: Vec<Piece>) -> Self {
+    pub fn new(material: MaterialKey) -> Self {
         let positions = Self::total_positions(&material);
 
         Self {
@@ -58,7 +59,7 @@ impl TableBuilder {
         }
     }
 
-    fn total_positions(material: &Vec<Piece>) -> usize {
+    fn total_positions(material: &MaterialKey) -> usize {
         64usize.pow(material.len() as u32)
     }
 
@@ -107,11 +108,11 @@ mod tests {
     #[test]
     fn position_index_roundtrip() {
         let tb = TableBuilder {
-            material: vec![
+            material: MaterialKey::new(vec![
                 Piece::from_char('K').unwrap(),
                 Piece::from_char('Q').unwrap(),
                 Piece::from_char('k').unwrap(),
-            ],
+            ]),
             positions: Vec::new(),
         };
 
