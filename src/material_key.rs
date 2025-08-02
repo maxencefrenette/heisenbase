@@ -179,6 +179,7 @@ impl fmt::Display for MaterialKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
     use shakmaty::Piece;
 
     #[test]
@@ -202,5 +203,48 @@ mod tests {
     #[test]
     fn rejects_missing_separator() {
         assert!(MaterialKey::from_string("KQK").is_none());
+    }
+
+    fn roundtrip_random_indices(mk: MaterialKey, seed: u64) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut successes = 0;
+        while successes < 10 {
+            let index = rng.gen_range(0..mk.total_positions());
+            if let Some(pos) = mk.index_to_position(index) {
+                let roundtrip = mk.position_to_index(&pos);
+                assert_eq!(index, roundtrip);
+                successes += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn roundtrip_kvk() {
+        let mk = MaterialKey::from_string("KvK").unwrap();
+        roundtrip_random_indices(mk, 0);
+    }
+
+    #[test]
+    fn roundtrip_kqvk() {
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        roundtrip_random_indices(mk, 1);
+    }
+
+    #[test]
+    fn roundtrip_krvkb() {
+        let mk = MaterialKey::from_string("KRvKB").unwrap();
+        roundtrip_random_indices(mk, 2);
+    }
+
+    #[test]
+    fn roundtrip_kqvkr() {
+        let mk = MaterialKey::from_string("KQvKR").unwrap();
+        roundtrip_random_indices(mk, 3);
+    }
+
+    #[test]
+    fn roundtrip_kbnvkq() {
+        let mk = MaterialKey::from_string("KBNvKQ").unwrap();
+        roundtrip_random_indices(mk, 4);
     }
 }
