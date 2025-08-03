@@ -105,10 +105,12 @@ impl TableBuilder {
             let old = self.positions[pos_index];
             let position = self.material.index_to_position(pos_index);
 
+            if old.is_certain() {
+                continue;
+            }
+
             // If the position is invalid, skip it.
-            if let Some(position) = position
-                && old.is_uncertain()
-            {
+            if let Some(position) = position {
                 let new_score = position
                     .legal_moves()
                     .into_iter()
