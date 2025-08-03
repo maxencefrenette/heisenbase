@@ -3,8 +3,8 @@ use crate::score::DtzScoreRange;
 use shakmaty::Position;
 
 pub struct TableBuilder {
-    material: MaterialKey,
-    positions: Vec<DtzScoreRange>,
+    pub(crate) material: MaterialKey,
+    pub(crate) positions: Vec<DtzScoreRange>,
 }
 
 impl TableBuilder {
