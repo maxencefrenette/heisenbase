@@ -1,6 +1,8 @@
 use std::fmt;
 
-use shakmaty::{CastlingMode, Chess, Color, FromSetup, Piece, Position, Role, Setup, Square};
+use shakmaty::{
+    Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, Role, Setup, Square,
+};
 
 /// Represents a material configuration, e.g. `KQvK`, and provides the
 /// bidirectional mapping between permutations of those pieces and compact
@@ -11,30 +13,85 @@ use shakmaty::{CastlingMode, Chess, Color, FromSetup, Piece, Position, Role, Set
 /// mapping enumerates combinations of their placements without ambiguity. Any
 /// arrangement with overlapping pieces is considered invalid and is never
 /// assigned an index.
-const ROLES: [Role; 6] = [
-    Role::King,
-    Role::Queen,
-    Role::Rook,
-    Role::Bishop,
-    Role::Knight,
-    Role::Pawn,
+
+#[derive(Clone, Copy)]
+enum PieceDescriptor {
+    King,
+    Queen,
+    Rook,
+    LightBishop,
+    DarkBishop,
+    Knight,
+    Pawn,
+}
+
+impl PieceDescriptor {
+    fn token(self) -> &'static str {
+        match self {
+            PieceDescriptor::King => "K",
+            PieceDescriptor::Queen => "Q",
+            PieceDescriptor::Rook => "R",
+            PieceDescriptor::LightBishop => "Bl",
+            PieceDescriptor::DarkBishop => "Bd",
+            PieceDescriptor::Knight => "N",
+            PieceDescriptor::Pawn => "P",
+        }
+    }
+
+    fn role(self) -> Role {
+        match self {
+            PieceDescriptor::King => Role::King,
+            PieceDescriptor::Queen => Role::Queen,
+            PieceDescriptor::Rook => Role::Rook,
+            PieceDescriptor::LightBishop | PieceDescriptor::DarkBishop => Role::Bishop,
+            PieceDescriptor::Knight => Role::Knight,
+            PieceDescriptor::Pawn => Role::Pawn,
+        }
+    }
+
+    fn light(self) -> Option<bool> {
+        match self {
+            PieceDescriptor::LightBishop => Some(true),
+            PieceDescriptor::DarkBishop => Some(false),
+            _ => None,
+        }
+    }
+
+    fn from_token(tok: &str) -> Option<Self> {
+        match tok {
+            "K" => Some(PieceDescriptor::King),
+            "Q" => Some(PieceDescriptor::Queen),
+            "R" => Some(PieceDescriptor::Rook),
+            "Bl" => Some(PieceDescriptor::LightBishop),
+            "Bd" => Some(PieceDescriptor::DarkBishop),
+            "N" => Some(PieceDescriptor::Knight),
+            "P" => Some(PieceDescriptor::Pawn),
+            _ => None,
+        }
+    }
+}
+
+const PIECES: [PieceDescriptor; 7] = [
+    PieceDescriptor::King,
+    PieceDescriptor::Queen,
+    PieceDescriptor::Rook,
+    PieceDescriptor::LightBishop,
+    PieceDescriptor::DarkBishop,
+    PieceDescriptor::Knight,
+    PieceDescriptor::Pawn,
 ];
 
-fn role_index(role: Role) -> usize {
-    match role {
-        Role::King => 0,
-        Role::Queen => 1,
-        Role::Rook => 2,
-        Role::Bishop => 3,
-        Role::Knight => 4,
-        Role::Pawn => 5,
-    }
+#[derive(Clone, Copy)]
+struct PieceGroup {
+    piece: Piece,
+    count: u8,
+    light: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaterialKey {
-    /// Piece counts indexed by color then role.
-    counts: [[u8; 6]; 2],
+    /// Piece counts indexed by color then piece descriptor.
+    counts: [[u8; PIECES.len()]; 2],
 }
 
 impl MaterialKey {
@@ -42,13 +99,13 @@ impl MaterialKey {
     ///
     /// # Syntax
     /// The expected form is `<white pieces>v<black pieces>`, where each side is
-    /// a sequence of piece characters and exactly one `v` separates the two
+    /// a sequence of piece tokens and exactly one `v` separates the two
     /// sides.
     ///
-    /// # Piece characters and colors
-    /// Supported characters are `K`, `Q`, `R`, `B`, `N` and `P` for king,
-    /// queen, rook, bishop, knight and pawn respectively. All characters must
-    /// be uppercase. Pieces appearing before the separator are interpreted as
+    /// # Piece tokens and colors
+    /// Supported tokens are `K`, `Q`, `R`, `Bl`, `Bd`, `N` and `P` for king,
+    /// queen, rook, light-squared bishop, dark-squared bishop, knight and pawn
+    /// respectively. Pieces appearing before the separator are interpreted as
     /// white, while those after it are treated as black.
     ///
     /// # Use cases
@@ -57,7 +114,7 @@ impl MaterialKey {
     ///
     /// # Errors
     /// Returns `None` if the string is malformed, contains unsupported
-    /// characters, has a missing or extra separator, or is otherwise ambiguous.
+    /// tokens, has a missing or extra separator, or is otherwise ambiguous.
     pub fn from_string(s: &str) -> Option<Self> {
         let mut parts = s.split('v');
         let white = parts.next()?;
@@ -68,26 +125,61 @@ impl MaterialKey {
             return None;
         }
 
-        let mut counts = [[0u8; 6]; 2];
+        let mut counts = [[0u8; PIECES.len()]; 2];
 
-        fn push_pieces(out: &mut [[u8; 6]; 2], chars: &str, color: Color) -> Option<()> {
+        fn push_pieces(out: &mut [[u8; PIECES.len()]; 2], s: &str, color: Color) -> Option<()> {
             let color_idx = match color {
                 Color::White => 0,
                 Color::Black => 1,
             };
-            for ch in chars.chars() {
-                let role = match ch {
-                    'K' => Role::King,
-                    'Q' => Role::Queen,
-                    'R' => Role::Rook,
-                    'B' => Role::Bishop,
-                    'N' => Role::Knight,
-                    'P' => Role::Pawn,
+
+            let bytes = s.as_bytes();
+            let mut i = 0;
+            while i < bytes.len() {
+                let token = match bytes[i] as char {
+                    'B' => {
+                        if i + 1 >= bytes.len() {
+                            return None;
+                        }
+                        match bytes[i + 1] as char {
+                            'l' => {
+                                i += 2;
+                                "Bl"
+                            }
+                            'd' => {
+                                i += 2;
+                                "Bd"
+                            }
+                            _ => return None,
+                        }
+                    }
+                    'K' => {
+                        i += 1;
+                        "K"
+                    }
+                    'Q' => {
+                        i += 1;
+                        "Q"
+                    }
+                    'R' => {
+                        i += 1;
+                        "R"
+                    }
+                    'N' => {
+                        i += 1;
+                        "N"
+                    }
+                    'P' => {
+                        i += 1;
+                        "P"
+                    }
                     _ => return None,
                 };
-                let role_idx = role_index(role);
-                out[color_idx][role_idx] += 1;
+
+                let pd = PieceDescriptor::from_token(token)?;
+                out[color_idx][pd as usize] += 1;
             }
+
             Some(())
         }
 
@@ -103,12 +195,24 @@ impl MaterialKey {
     /// on distinct squares. Identical pieces are treated as indistinguishable,
     /// so their placements are counted combinatorially.
     pub fn total_positions(&self) -> usize {
-        let mut remaining = 64usize;
+        let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
         let mut total = 1usize;
-        for (_, count) in self.piece_groups() {
-            let c = n_choose_k(remaining, count as usize);
-            total *= c;
-            remaining -= count as usize;
+        for group in self.piece_groups() {
+            let allowed: Vec<usize> = squares
+                .iter()
+                .enumerate()
+                .filter(|&(_, sq)| match group.light {
+                    Some(true) => sq.is_light(),
+                    Some(false) => sq.is_dark(),
+                    None => true,
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let base = n_choose_k(allowed.len(), group.count as usize);
+            total *= base;
+            for idx in allowed.iter().take(group.count as usize).rev() {
+                squares.remove(*idx);
+            }
         }
         // Also account for which side is to move.
         total * 2
@@ -136,17 +240,29 @@ impl MaterialKey {
         setup.turn = turn;
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
-        for (piece, count) in self.piece_groups() {
-            let base = n_choose_k(squares.len(), count as usize);
+        for group in self.piece_groups() {
+            let allowed: Vec<usize> = squares
+                .iter()
+                .enumerate()
+                .filter(|&(_, sq)| match group.light {
+                    Some(true) => sq.is_light(),
+                    Some(false) => sq.is_dark(),
+                    None => true,
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let base = n_choose_k(allowed.len(), group.count as usize);
             let group_index = pos_index % base;
             pos_index /= base;
-            let indices = unrank_combination(squares.len(), count as usize, group_index);
-            let chosen: Vec<Square> = indices.iter().map(|&i| squares[i]).collect();
-            for idx in indices.iter().rev() {
+            let rel_indices = unrank_combination(allowed.len(), group.count as usize, group_index);
+            let mut chosen_indices: Vec<usize> = rel_indices.iter().map(|&r| allowed[r]).collect();
+            let chosen_squares: Vec<Square> = chosen_indices.iter().map(|&i| squares[i]).collect();
+            chosen_indices.sort_unstable();
+            for idx in chosen_indices.iter().rev() {
                 squares.remove(*idx);
             }
-            for square in chosen {
-                setup.board.set_piece_at(square, piece);
+            for square in chosen_squares {
+                setup.board.set_piece_at(square, group.piece);
             }
         }
 
@@ -164,26 +280,44 @@ impl MaterialKey {
         let mut multiplier = 1usize;
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
-        for (piece, count) in self.piece_groups() {
-            let base = n_choose_k(squares.len(), count as usize);
+        for group in self.piece_groups() {
+            let allowed: Vec<usize> = squares
+                .iter()
+                .enumerate()
+                .filter(|&(_, sq)| match group.light {
+                    Some(true) => sq.is_light(),
+                    Some(false) => sq.is_dark(),
+                    None => true,
+                })
+                .map(|(i, _)| i)
+                .collect();
+            let base = n_choose_k(allowed.len(), group.count as usize);
 
             let mut piece_indices: Vec<usize> = {
-                let bb = position.board().by_piece(piece);
-                let mut v = Vec::with_capacity(count as usize);
+                let mask = match group.light {
+                    Some(true) => Bitboard::LIGHT_SQUARES,
+                    Some(false) => Bitboard::DARK_SQUARES,
+                    None => Bitboard::FULL,
+                };
+                let bb = position.board().by_piece(group.piece) & mask;
+                let mut v = Vec::with_capacity(group.count as usize);
                 for sq in bb {
-                    let idx = squares
+                    let idx = allowed
                         .iter()
-                        .position(|&s| s == sq)
+                        .position(|&i| squares[i] == sq)
                         .expect("piece square must exist");
                     v.push(idx);
                 }
                 v
             };
             piece_indices.sort();
-            assert_eq!(piece_indices.len(), count as usize);
-            let group_index = rank_combination(squares.len(), piece_indices.as_slice());
+            assert_eq!(piece_indices.len(), group.count as usize);
+            let group_index = rank_combination(allowed.len(), piece_indices.as_slice());
             index += group_index * multiplier;
-            for idx in piece_indices.iter().rev() {
+            let mut remove_indices: Vec<usize> =
+                piece_indices.iter().map(|&ai| allowed[ai]).collect();
+            remove_indices.sort_unstable();
+            for idx in remove_indices.iter().rev() {
                 squares.remove(*idx);
             }
             multiplier *= base;
@@ -204,16 +338,9 @@ impl fmt::Display for MaterialKey {
                 write!(f, "v")?;
             }
 
-            for (ch, role) in [
-                ('K', Role::King),
-                ('Q', Role::Queen),
-                ('R', Role::Rook),
-                ('B', Role::Bishop),
-                ('N', Role::Knight),
-                ('P', Role::Pawn),
-            ] {
-                for _ in 0..self.counts[color_idx][role_index(role)] {
-                    write!(f, "{}", ch)?;
+            for (i, pd) in PIECES.iter().enumerate() {
+                for _ in 0..self.counts[color_idx][i] {
+                    write!(f, "{}", pd.token())?;
                 }
             }
         }
@@ -224,13 +351,20 @@ impl fmt::Display for MaterialKey {
 
 impl MaterialKey {
     /// Group identical pieces with their multiplicity.
-    fn piece_groups(&self) -> Vec<(Piece, u8)> {
+    fn piece_groups(&self) -> Vec<PieceGroup> {
         let mut groups = Vec::new();
         for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
-            for &role in &ROLES {
-                let count = self.counts[color_idx][role_index(role)];
+            for (i, pd) in PIECES.iter().enumerate() {
+                let count = self.counts[color_idx][i];
                 if count > 0 {
-                    groups.push((Piece { role, color }, count));
+                    groups.push(PieceGroup {
+                        piece: Piece {
+                            role: pd.role(),
+                            color,
+                        },
+                        count,
+                        light: pd.light(),
+                    });
                 }
             }
         }
@@ -294,6 +428,12 @@ mod tests {
     }
 
     #[test]
+    fn parses_light_and_dark_bishops() {
+        let mk = MaterialKey::from_string("BlBdvK").unwrap();
+        assert_eq!(mk.to_string(), "BlBdvK");
+    }
+
+    #[test]
     fn rejects_invalid_char() {
         assert!(MaterialKey::from_string("KXvK").is_none());
     }
@@ -342,7 +482,7 @@ mod tests {
 
     #[test]
     fn roundtrip_krvkb() {
-        let mk = MaterialKey::from_string("KRvKB").unwrap();
+        let mk = MaterialKey::from_string("KRvKBd").unwrap();
         roundtrip_random_indices(mk, 2);
     }
 
@@ -354,7 +494,7 @@ mod tests {
 
     #[test]
     fn roundtrip_kbnvkq() {
-        let mk = MaterialKey::from_string("KBNvKQ").unwrap();
+        let mk = MaterialKey::from_string("KBdNvKQ").unwrap();
         roundtrip_random_indices(mk, 4);
     }
 
