@@ -356,27 +356,7 @@ impl MaterialKey {
         };
         Ok(index * 2 + turn_index)
     }
-}
 
-impl fmt::Display for MaterialKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for color_idx in 0..2 {
-            if color_idx == 1 {
-                write!(f, "v")?;
-            }
-
-            for (i, pd) in PIECES.iter().enumerate() {
-                for _ in 0..self.counts[color_idx][i] {
-                    write!(f, "{}", pd.token())?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl MaterialKey {
     /// Group identical pieces with their multiplicity.
     fn piece_groups(&self) -> Vec<PieceGroup> {
         let mut groups = Vec::new();
@@ -396,6 +376,24 @@ impl MaterialKey {
             }
         }
         groups
+    }
+}
+
+impl fmt::Display for MaterialKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for color_idx in 0..2 {
+            if color_idx == 1 {
+                write!(f, "v")?;
+            }
+
+            for (i, pd) in PIECES.iter().enumerate() {
+                for _ in 0..self.counts[color_idx][i] {
+                    write!(f, "{}", pd.token())?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
