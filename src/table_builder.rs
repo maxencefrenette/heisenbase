@@ -52,10 +52,12 @@ impl TableBuilder {
                     position
                         .legal_moves()
                         .into_iter()
+                        .filter(|m| !m.is_capture())
                         .map(|chess_move| {
                             let mut child_position = position.clone();
                             child_position.play_unchecked(chess_move);
-                            let child_index = self.material.position_to_index(&child_position);
+                            let child_index =
+                                self.material.position_to_index(&child_position).unwrap();
                             self.positions[child_index]
                         })
                         .fold(self.positions[pos_index], |a, b| a.negamax(&b))
@@ -89,12 +91,15 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
 
-        let index = tb.material.position_to_index(&position);
+        let index = tb.material.position_to_index(&position).unwrap();
         let reconstructed = tb
             .material
             .index_to_position(index)
             .expect("valid position");
 
-        assert_eq!(tb.material.position_to_index(&reconstructed), index);
+        assert_eq!(
+            tb.material.position_to_index(&reconstructed).unwrap(),
+            index
+        );
     }
 }
