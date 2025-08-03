@@ -3,6 +3,7 @@ use heisenbase::compression::compress_wdl;
 use heisenbase::material_key::MaterialKey;
 use heisenbase::table_builder::TableBuilder;
 use heisenbase::wdl_file::write_wdl_file;
+use heisenbase::wdl_score_range::WdlScoreRange;
 use heisenbase::wdl_table::WdlTable;
 
 #[derive(Parser)]
@@ -30,6 +31,29 @@ fn main() {
             let mut table_builder = TableBuilder::new(material);
             table_builder.solve();
             let wdl_table: WdlTable = table_builder.into();
+            let total = wdl_table.positions.len() as f64;
+            let mut counts = [0usize; 7];
+            for wdl in &wdl_table.positions {
+                counts[*wdl as usize] += 1;
+            }
+            println!("WDL statistics:");
+            for variant in [
+                WdlScoreRange::Unknown,
+                WdlScoreRange::WinOrDraw,
+                WdlScoreRange::DrawOrLoss,
+                WdlScoreRange::Win,
+                WdlScoreRange::Draw,
+                WdlScoreRange::Loss,
+                WdlScoreRange::IllegalPosition,
+            ] {
+                let count = counts[variant as usize];
+                let percentage = if total > 0.0 {
+                    (count as f64 / total) * 100.0
+                } else {
+                    0.0
+                };
+                println!("{:?}: {:.2}%", variant, percentage);
+            }
             let compressed = compress_wdl(&wdl_table.positions);
             let filename = format!("./data/{}.hbt", wdl_table.material);
             write_wdl_file(&filename, &wdl_table.material, &compressed)
