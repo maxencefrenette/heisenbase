@@ -37,48 +37,6 @@ impl TableBuilder {
         }
     }
 
-    /// Perform one iteration of the table builder.
-    ///
-    /// This performs one bellman update on every position in the table and returns the number of
-    /// positions that changed.
-    fn step(&mut self) -> usize {
-        let mut updates = 0;
-        for pos_index in 0..self.positions.len() {
-            let old = self.positions[pos_index];
-            let position = self.material.index_to_position(pos_index);
-
-            // If the position is invalid, skip it.
-            if let Some(position) = position {
-                let new_score = if position.is_checkmate() {
-                    DtzScoreRange::checkmate()
-                } else if position.is_stalemate() || position.is_insufficient_material() {
-                    DtzScoreRange::draw()
-                } else {
-                    position
-                        .legal_moves()
-                        .into_iter()
-                        .filter(|m| !m.is_capture())
-                        .map(|chess_move| {
-                            let mut child_position = position.clone();
-                            child_position.play_unchecked(chess_move);
-                            let child_index =
-                                self.material.position_to_index(&child_position).unwrap();
-                            self.positions[child_index]
-                        })
-                        .fold(self.positions[pos_index], |a, b| {
-                            a.max(&b.flip().add_half_move())
-                        })
-                };
-
-                if new_score != old {
-                    self.positions[pos_index] = new_score;
-                    updates += 1;
-                }
-            }
-        }
-        updates
-    }
-
     /// Perform the initial step of the table builder.
     ///
     /// This scans every position in the table. Terminal positions (checkmate or
@@ -134,6 +92,41 @@ impl TableBuilder {
             }
         }
 
+        updates
+    }
+
+    /// Perform one iteration of the table builder.
+    ///
+    /// This performs one bellman update on every position in the table and returns the number of
+    /// positions that changed.
+    fn step(&mut self) -> usize {
+        let mut updates = 0;
+        for pos_index in 0..self.positions.len() {
+            let old = self.positions[pos_index];
+            let position = self.material.index_to_position(pos_index);
+
+            // If the position is invalid, skip it.
+            if let Some(position) = position
+                && old.is_uncertain()
+            {
+                let new_score = position
+                    .legal_moves()
+                    .into_iter()
+                    .filter(|m| !m.is_capture())
+                    .map(|chess_move| {
+                        let mut child_position = position.clone();
+                        child_position.play_unchecked(chess_move);
+                        let child_index = self.material.position_to_index(&child_position).unwrap();
+                        self.positions[child_index]
+                    })
+                    .fold(old, |a, b| a.max(&b.flip().add_half_move()));
+
+                if new_score != old {
+                    self.positions[pos_index] = new_score;
+                    updates += 1;
+                }
+            }
+        }
         updates
     }
 }

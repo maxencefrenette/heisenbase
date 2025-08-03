@@ -97,6 +97,18 @@ impl DtzScoreRange {
         }
     }
 
+    pub fn is_certain(&self) -> bool {
+        self.min == self.max
+    }
+
+    pub fn is_uncertain(&self) -> bool {
+        self.min != self.max
+    }
+
+    /// Flips the score range.
+    ///
+    /// This is used to convert a score range from the perspective of the side to move to the
+    /// perspective of the other side.
     pub fn flip(&self) -> Self {
         Self {
             min: -self.max,
