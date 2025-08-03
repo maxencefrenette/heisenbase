@@ -110,7 +110,8 @@ impl MaterialKey {
             total *= c;
             remaining -= count as usize;
         }
-        total
+        // Also account for which side is to move.
+        total * 2
     }
 
     /// Convert an index into a [`Chess`] position.
@@ -123,7 +124,16 @@ impl MaterialKey {
             return None;
         }
 
+        // Extract side to move from the index.
+        let turn = if pos_index % 2 == 0 {
+            Color::White
+        } else {
+            Color::Black
+        };
+        pos_index /= 2;
+
         let mut setup = Setup::empty();
+        setup.turn = turn;
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
         for (piece, count) in self.piece_groups() {
@@ -179,7 +189,11 @@ impl MaterialKey {
             multiplier *= base;
         }
 
-        index
+        let turn_index = match position.turn() {
+            Color::White => 0usize,
+            Color::Black => 1usize,
+        };
+        index * 2 + turn_index
     }
 }
 
@@ -292,13 +306,13 @@ mod tests {
     #[test]
     fn total_positions_without_overlap() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(mk.total_positions(), 64 * 63 * 62);
+        assert_eq!(mk.total_positions(), 64 * 63 * 62 * 2);
     }
 
     #[test]
     fn total_positions_with_duplicates() {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
-        assert_eq!(mk.total_positions(), 64 * (63 * 62 / 2) * 61);
+        assert_eq!(mk.total_positions(), 64 * (63 * 62 / 2) * 61 * 2);
     }
 
     fn roundtrip_random_indices(mk: MaterialKey, seed: u64) {
