@@ -20,6 +20,11 @@ impl TableBuilder {
     pub fn solve(&mut self) {
         const MAX_STEPS: usize = 101;
 
+        // Perform an initial scan of the table to mark terminal positions and
+        // capture moves leading directly to terminal positions.
+        let updates = self.step_initial();
+        println!("Initial step: {} updates", updates);
+
         for step in 0..MAX_STEPS {
             let updates = self.step();
             println!("Step {}: {} updates", step, updates);
@@ -69,6 +74,64 @@ impl TableBuilder {
                 }
             }
         }
+        updates
+    }
+
+    /// Perform the initial step of the table builder.
+    ///
+    /// This scans every position in the table. Terminal positions (checkmate or
+    /// stalemate/insufficient material) are assigned their final scores. For all
+    /// other positions, capture moves are analysed and if they lead to terminal
+    /// positions the score range is updated accordingly.
+    fn step_initial(&mut self) -> usize {
+        let mut updates = 0;
+
+        for pos_index in 0..self.positions.len() {
+            let old = self.positions[pos_index];
+            let position = self.material.index_to_position(pos_index);
+
+            if let Some(position) = position {
+                // First mark terminal positions.
+                let mut new_score = if position.is_checkmate() {
+                    DtzScoreRange::checkmate()
+                } else if position.is_stalemate() || position.is_insufficient_material() {
+                    DtzScoreRange::draw()
+                } else {
+                    old
+                };
+
+                // If the position wasn't terminal, look at capture moves that lead
+                // to terminal positions and update the score range accordingly.
+                if new_score == old {
+                    for chess_move in position
+                        .legal_moves()
+                        .into_iter()
+                        .filter(|m| m.is_capture())
+                    {
+                        let mut child_position = position.clone();
+                        child_position.play_unchecked(chess_move);
+
+                        let child_score = if child_position.is_checkmate() {
+                            DtzScoreRange::checkmate()
+                        } else if child_position.is_stalemate()
+                            || child_position.is_insufficient_material()
+                        {
+                            DtzScoreRange::draw()
+                        } else {
+                            continue;
+                        };
+
+                        new_score = new_score.negamax(&child_score);
+                    }
+                }
+
+                if new_score != old {
+                    self.positions[pos_index] = new_score;
+                    updates += 1;
+                }
+            }
+        }
+
         updates
     }
 }
