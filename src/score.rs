@@ -106,6 +106,10 @@ impl DtzScoreRange {
             max -= 1;
         }
 
+        // Clamp to valid DTZ score bounds.
+        let min = min.min(DtzScore::immediate_win());
+        let max = max.max(DtzScore::immediate_loss());
+
         Self { min, max }
     }
 
