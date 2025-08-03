@@ -31,7 +31,7 @@ fn main() {
             table_builder.solve();
             let wdl_table: WdlTable = table_builder.into();
             let compressed = compress_wdl(&wdl_table.positions);
-            let filename = format!("{}.hbt", wdl_table.material);
+            let filename = format!("./data/{}.hbt", wdl_table.material);
             write_wdl_file(&filename, &wdl_table.material, &compressed)
                 .expect("failed to write table file");
             println!("Wrote table to {}", filename);
