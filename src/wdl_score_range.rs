@@ -1,5 +1,3 @@
-use crate::score::{DtzScore, DtzScoreRange};
-
 /// Range of win/draw/loss values stored in a table.
 ///
 /// The discriminants of this enum are important for compression as they are
@@ -40,27 +38,5 @@ impl core::convert::TryFrom<u8> for WdlScoreRange {
             6 => IllegalPosition,
             _ => return Err(()),
         })
-    }
-}
-
-impl From<DtzScoreRange> for WdlScoreRange {
-    fn from(score: DtzScoreRange) -> Self {
-        use WdlScoreRange::*;
-
-        let zero = DtzScore::draw();
-
-        if score.min > zero {
-            Win
-        } else if score.max < zero {
-            Loss
-        } else if score.min == zero && score.max == zero {
-            Draw
-        } else if score.min >= zero && score.max > zero {
-            WinOrDraw
-        } else if score.min < zero && score.max == zero {
-            DrawOrLoss
-        } else {
-            Unknown
-        }
     }
 }

@@ -1,5 +1,7 @@
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
+use crate::wdl_score_range::WdlScoreRange;
+
 /// A DTZ score.
 ///
 /// This score is from the perspective of the side to move.
@@ -69,8 +71,8 @@ impl SubAssign<i8> for DtzScore {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DtzScoreRange {
-    pub min: DtzScore,
-    pub max: DtzScore,
+    min: DtzScore,
+    max: DtzScore,
 }
 
 impl DtzScoreRange {
@@ -136,5 +138,22 @@ impl DtzScoreRange {
         let max = self.max.max(other.max);
 
         Self { min, max }
+    }
+}
+
+impl From<DtzScoreRange> for WdlScoreRange {
+    fn from(score: DtzScoreRange) -> Self {
+        match (score.min.0.signum(), score.max.0.signum()) {
+            (1, 1) => WdlScoreRange::Win,
+            (1, 0) => panic!("DtzScoreRange::into: min > 0 and max == 0"),
+            (1, -1) => panic!("DtzScoreRange::into: min > 0 and max < 0"),
+            (0, 1) => WdlScoreRange::WinOrDraw,
+            (0, 0) => WdlScoreRange::Draw,
+            (0, -1) => panic!("DtzScoreRange::into: min == 0 and max < 0"),
+            (-1, 1) => WdlScoreRange::Unknown,
+            (-1, 0) => WdlScoreRange::DrawOrLoss,
+            (-1, -1) => WdlScoreRange::Loss,
+            (_, _) => unreachable!(),
+        }
     }
 }
