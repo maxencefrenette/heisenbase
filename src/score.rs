@@ -81,6 +81,7 @@ impl DtzScoreRange {
         }
     }
 
+    /// A checkmate is on the board. The side to move is checkmated.
     pub fn checkmate() -> Self {
         Self {
             min: DtzScore::immediate_loss(),
@@ -88,6 +89,7 @@ impl DtzScoreRange {
         }
     }
 
+    /// Forced draw.
     pub fn draw() -> Self {
         Self {
             min: DtzScore::draw(),
@@ -95,32 +97,31 @@ impl DtzScoreRange {
         }
     }
 
-    fn parent_move_score(&self) -> Self {
-        let mut min = -self.max;
-        let mut max = -self.min;
+    pub fn flip(&self) -> Self {
+        Self {
+            min: -self.max,
+            max: -self.min,
+        }
+    }
 
-        if !min.is_draw() {
+    pub fn add_half_move(&self) -> Self {
+        let mut min = self.min;
+        let mut max = self.max;
+
+        if min < DtzScore::draw() {
             min += 1;
         }
-        if !max.is_draw() {
+        if max > DtzScore::draw() {
             max -= 1;
         }
-
-        // Clamp to valid DTZ score bounds.
-        let min = min.min(DtzScore::immediate_win());
-        let max = max.max(DtzScore::immediate_loss());
 
         Self { min, max }
     }
 
-    /// Used as part of a reduce call to find the best score.
-    ///
-    /// other is one halfmove in the future compared to self.
-    pub fn negamax(&self, other: &Self) -> Self {
-        let other_flipped = other.parent_move_score();
-
-        let min = self.min.max(other_flipped.min);
-        let max = self.max.max(other_flipped.max);
+    /// Returns the bound-wise maximum of the two scores.
+    pub fn max(&self, other: &Self) -> Self {
+        let min = self.min.max(other.min);
+        let max = self.max.max(other.max);
 
         Self { min, max }
     }

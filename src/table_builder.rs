@@ -1,5 +1,5 @@
 use crate::material_key::MaterialKey;
-use crate::score::DtzScoreRange;
+use crate::score::{DtzScore, DtzScoreRange};
 use shakmaty::Position;
 
 pub struct TableBuilder {
@@ -65,7 +65,9 @@ impl TableBuilder {
                                 self.material.position_to_index(&child_position).unwrap();
                             self.positions[child_index]
                         })
-                        .fold(self.positions[pos_index], |a, b| a.negamax(&b))
+                        .fold(self.positions[pos_index], |a, b| {
+                            a.max(&b.flip().add_half_move())
+                        })
                 };
 
                 if new_score != old {
@@ -121,7 +123,7 @@ impl TableBuilder {
                             continue;
                         };
 
-                        new_score = new_score.negamax(&child_score);
+                        new_score = new_score.max(&child_score.flip());
                     }
                 }
 
