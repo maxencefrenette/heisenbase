@@ -1,5 +1,5 @@
 use crate::material_key::MaterialKey;
-use crate::score::{DtzScore, DtzScoreRange};
+use crate::score::DtzScoreRange;
 use shakmaty::Position;
 
 pub struct TableBuilder {
