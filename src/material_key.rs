@@ -94,6 +94,11 @@ pub struct MaterialKey {
     counts: [[u8; PIECES.len()]; 2],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaterialError {
+    MismatchedMaterial,
+}
+
 impl MaterialKey {
     /// Parse a [`MaterialKey`] from its textual representation.
     ///
@@ -272,15 +277,38 @@ impl MaterialKey {
     /// Convert a [`Chess`] position back into its index within this material
     /// mapping.
     ///
-    /// The position must contain each piece from this key exactly once on a
-    /// distinct square. Positions that violate this requirement are outside the
-    /// mapping and result in undefined behaviour.
-    pub fn position_to_index(&self, position: &Chess) -> usize {
+    /// The position must contain exactly the pieces described by this key,
+    /// each appearing on a distinct square. Positions with mismatched material
+    /// are outside the mapping and return an error.
+    pub fn position_to_index(&self, position: &Chess) -> Result<usize, MaterialError> {
+        let mut board_counts = [[0u8; PIECES.len()]; 2];
+        for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
+            for (i, pd) in PIECES.iter().enumerate() {
+                let mask = match pd.light() {
+                    Some(true) => Bitboard::LIGHT_SQUARES,
+                    Some(false) => Bitboard::DARK_SQUARES,
+                    None => Bitboard::FULL,
+                };
+                let piece = Piece {
+                    role: pd.role(),
+                    color,
+                };
+                let count = (position.board().by_piece(piece) & mask)
+                    .into_iter()
+                    .count() as u8;
+                board_counts[color_idx][i] = count;
+            }
+        }
+        if board_counts != self.counts {
+            return Err(MaterialError::MismatchedMaterial);
+        }
+
+        let groups = self.piece_groups();
         let mut index = 0usize;
         let mut multiplier = 1usize;
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
-        for group in self.piece_groups() {
+        for group in groups {
             let allowed: Vec<usize> = squares
                 .iter()
                 .enumerate()
@@ -311,7 +339,6 @@ impl MaterialKey {
                 v
             };
             piece_indices.sort();
-            assert_eq!(piece_indices.len(), group.count as usize);
             let group_index = rank_combination(allowed.len(), piece_indices.as_slice());
             index += group_index * multiplier;
             let mut remove_indices: Vec<usize> =
@@ -327,7 +354,7 @@ impl MaterialKey {
             Color::White => 0usize,
             Color::Black => 1usize,
         };
-        index * 2 + turn_index
+        Ok(index * 2 + turn_index)
     }
 }
 
@@ -461,7 +488,7 @@ mod tests {
         while successes < 10 {
             let index = rng.gen_range(0..mk.total_positions());
             if let Some(pos) = mk.index_to_position(index) {
-                let roundtrip = mk.position_to_index(&pos);
+                let roundtrip = mk.position_to_index(&pos).unwrap();
                 assert_eq!(index, roundtrip);
                 successes += 1;
             }
