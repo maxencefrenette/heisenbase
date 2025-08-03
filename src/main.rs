@@ -7,6 +7,7 @@ mod wdl_table;
 use clap::{Parser, Subcommand};
 use material_key::MaterialKey;
 use table_builder::TableBuilder;
+use wdl_table::WdlTable;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
