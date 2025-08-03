@@ -1,6 +1,8 @@
 mod material_key;
 mod score;
 mod table_builder;
+mod wdl_score_range;
+mod wdl_table;
 
 use clap::{Parser, Subcommand};
 use material_key::MaterialKey;
