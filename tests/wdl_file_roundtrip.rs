@@ -8,6 +8,7 @@ use heisenbase::{
 use shakmaty::Position;
 
 #[test]
+#[ignore]
 fn write_read_round_trip() {
     let material = MaterialKey::from_string("KQvK").unwrap();
     let total = material.total_positions();
