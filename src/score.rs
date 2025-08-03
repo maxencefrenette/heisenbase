@@ -33,6 +33,18 @@ impl DtzScore {
     }
 }
 
+impl DtzScore {
+    pub fn add_half_move(&self) -> Self {
+        if self.0 > 0 {
+            Self(self.0 - 1)
+        } else if self.0 < 0 {
+            Self(self.0 + 1)
+        } else {
+            self.clone()
+        }
+    }
+}
+
 impl Neg for DtzScore {
     type Output = Self;
 
@@ -119,17 +131,10 @@ impl DtzScoreRange {
     }
 
     pub fn add_half_move(&self) -> Self {
-        let mut min = self.min;
-        let mut max = self.max;
-
-        if min < DtzScore::draw() {
-            min += 1;
+        Self {
+            min: self.min.add_half_move(),
+            max: self.max.add_half_move(),
         }
-        if max > DtzScore::draw() {
-            max -= 1;
-        }
-
-        Self { min, max }
     }
 
     /// Returns the bound-wise maximum of the two scores.
