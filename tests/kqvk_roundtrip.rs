@@ -12,16 +12,19 @@ fn compress_decompress_kqvk_table_round_trip() {
     let total = material.total_positions();
     let mut positions = Vec::with_capacity(total);
     for idx in 0..total {
-        if let Some(position) = material.index_to_position(idx) {
-            let wdl = if position.is_checkmate() {
-                WdlScoreRange::Loss
-            } else if position.is_stalemate() || position.is_insufficient_material() {
-                WdlScoreRange::Draw
-            } else {
-                WdlScoreRange::Unknown
-            };
-            positions.push(wdl);
-        }
+        let wdl = match material.index_to_position(idx) {
+            Ok(position) => {
+                if position.is_checkmate() {
+                    WdlScoreRange::Loss
+                } else if position.is_stalemate() || position.is_insufficient_material() {
+                    WdlScoreRange::Draw
+                } else {
+                    WdlScoreRange::Unknown
+                }
+            }
+            Err(_) => WdlScoreRange::Unknown,
+        };
+        positions.push(wdl);
     }
     let table = WdlTable {
         material,

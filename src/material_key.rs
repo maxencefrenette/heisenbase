@@ -1,7 +1,8 @@
 use std::fmt;
 
 use shakmaty::{
-    Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, Role, Setup, Square,
+    Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, PositionErrorKinds, Role,
+    Setup, Square,
 };
 
 /// Represents a material configuration, e.g. `KQvK`, and provides the
@@ -94,9 +95,11 @@ pub struct MaterialKey {
     counts: [[u8; PIECES.len()]; 2],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MaterialError {
     MismatchedMaterial,
+    IndexOutOfBounds,
+    InvalidPosition(PositionErrorKinds),
 }
 
 impl MaterialKey {
@@ -225,12 +228,22 @@ impl MaterialKey {
 
     /// Convert an index into a [`Chess`] position.
     ///
-    /// Returns `None` only when the index exceeds the number of mappable
-    /// positions. Every index less than [`total_positions`](Self::total_positions)
-    /// yields a unique placement with all pieces on distinct squares.
-    pub fn index_to_position(&self, mut pos_index: usize) -> Option<Chess> {
+    /// Every index less than [`total_positions`](Self::total_positions)
+    /// corresponds to a unique arrangement of the pieces described by this
+    /// key.  The mapping is purely combinatorial and intentionally ignores the
+    /// rules of play, so some indices yield setups that are unreachable or
+    /// illegal under normal chess rules — for example, kings adjacent to one
+    /// another or a side to move that can immediately capture the opposing
+    /// king.  When [`shakmaty`] rejects such a placement, this method returns
+    /// [`Err(MaterialError::InvalidPosition)`] with the [`PositionErrorKinds`]
+    /// describing the validation failure. Callers that only care about legal positions should
+    /// match on the result and discard or otherwise handle these errors.
+    ///
+    /// Indices greater than or equal to `total_positions()` return
+    /// [`Err(MaterialError::IndexOutOfBounds)`].
+    pub fn index_to_position(&self, mut pos_index: usize) -> Result<Chess, MaterialError> {
         if pos_index >= self.total_positions() {
-            return None;
+            return Err(MaterialError::IndexOutOfBounds);
         }
 
         // Extract side to move from the index.
@@ -271,7 +284,8 @@ impl MaterialKey {
             }
         }
 
-        Chess::from_setup(setup, CastlingMode::Standard).ok()
+        Chess::from_setup(setup, CastlingMode::Standard)
+            .map_err(|e| MaterialError::InvalidPosition(e.kinds()))
     }
 
     /// Convert a [`Chess`] position back into its index within this material
@@ -482,13 +496,11 @@ mod tests {
 
     fn roundtrip_random_indices(mk: MaterialKey, seed: u64) {
         let mut rng = StdRng::seed_from_u64(seed);
-        let mut successes = 0;
-        while successes < 10 {
+        for _ in 0..10 {
             let index = rng.gen_range(0..mk.total_positions());
-            if let Some(pos) = mk.index_to_position(index) {
+            if let Ok(pos) = mk.index_to_position(index) {
                 let roundtrip = mk.position_to_index(&pos).unwrap();
                 assert_eq!(index, roundtrip);
-                successes += 1;
             }
         }
     }
@@ -527,5 +539,35 @@ mod tests {
     fn roundtrip_knnvk() {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
         roundtrip_random_indices(mk, 5);
+    }
+
+    #[test]
+    fn index_to_position_out_of_bounds() {
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        let index = mk.total_positions();
+        assert!(matches!(
+            mk.index_to_position(index),
+            Err(MaterialError::IndexOutOfBounds)
+        ));
+    }
+
+    #[test]
+    fn index_to_position_invalid_position() {
+        let mk = MaterialKey::from_string("KvK").unwrap();
+        let mut found_invalid = false;
+        for idx in 0..mk.total_positions() {
+            match mk.index_to_position(idx) {
+                Err(MaterialError::InvalidPosition(_)) => {
+                    found_invalid = true;
+                    break;
+                }
+                Err(MaterialError::IndexOutOfBounds) => {
+                    panic!("index {} unexpectedly out of bounds", idx)
+                }
+                Ok(_) => {}
+                Err(MaterialError::MismatchedMaterial) => unreachable!(),
+            }
+        }
+        assert!(found_invalid);
     }
 }
