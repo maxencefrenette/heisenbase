@@ -1,6 +1,6 @@
 use crate::material_key::MaterialKey;
 use crate::score::DtzScoreRange;
-use shakmaty::Position;
+use shakmaty::{Color, Position};
 
 pub struct TableBuilder {
     pub(crate) material: MaterialKey,
@@ -64,7 +64,6 @@ impl TableBuilder {
             let new_score = position
                 .legal_moves()
                 .into_iter()
-                .filter(|m| !m.is_capture())
                 .map(|chess_move| {
                     let mut child_position = position.clone();
                     child_position.play_unchecked(chess_move);
@@ -90,7 +89,8 @@ impl TableBuilder {
                         }
                     }
                 })
-                .fold(old_score, |a, b| a.max(&b.flip()));
+                .reduce(|a, b| a.max(&b.flip()))
+                .expect("every non-terminal position should have at least one legal move");
 
             if new_score != old_score {
                 self.positions[pos_index] = new_score;
