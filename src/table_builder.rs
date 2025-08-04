@@ -40,10 +40,10 @@ impl TableBuilder {
         let mut updates = 0;
         for pos_index in 0..self.positions.len() {
             let old_score = self.positions[pos_index];
-            let position = self
-                .material
-                .index_to_position(pos_index)
-                .expect("every index should map to a position");
+            let position = match self.material.index_to_position(pos_index) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
 
             if old_score.is_certain() {
                 continue;
