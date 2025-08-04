@@ -105,6 +105,7 @@ impl TableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wdl_score_range::WdlScoreRange;
     use shakmaty::{CastlingMode, fen::Fen};
 
     #[test]
@@ -130,5 +131,71 @@ mod tests {
             tb.material.position_to_index(&reconstructed).unwrap(),
             index
         );
+    }
+
+    #[test]
+    fn terminal_positions_scored_in_first_step() {
+        let material = MaterialKey::from_string("KQvK").unwrap();
+        let mut tb = TableBuilder::new(material);
+
+        // Mark all positions as draws so the step only evaluates the targets.
+        tb.positions.fill(DtzScoreRange::draw());
+
+        let checkmate = "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let stalemate = "k7/8/1QK5/8/8/8/8/8 b - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+
+        let checkmate_idx = tb.material.position_to_index(&checkmate).unwrap();
+        let stalemate_idx = tb.material.position_to_index(&stalemate).unwrap();
+
+        tb.positions[checkmate_idx] = DtzScoreRange::unknown();
+        tb.positions[stalemate_idx] = DtzScoreRange::unknown();
+
+        tb.step();
+
+        assert_eq!(tb.positions[checkmate_idx], DtzScoreRange::checkmate());
+        assert_eq!(tb.positions[stalemate_idx], DtzScoreRange::draw());
+    }
+
+    #[test]
+    fn mate_in_one_scored_after_two_steps() {
+        let material = MaterialKey::from_string("KQvK").unwrap();
+        let mut tb = TableBuilder::new(material);
+
+        // Pre-fill positions with draws so only relevant indices are processed.
+        tb.positions.fill(DtzScoreRange::draw());
+
+        let mate_in_one = "k7/8/1QK5/8/8/8/8/8 w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let idx = tb.material.position_to_index(&mate_in_one).unwrap();
+
+        // Identify the checkmate position reached after Qb7#.
+        let checkmate = "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let checkmate_idx = tb.material.position_to_index(&checkmate).unwrap();
+
+        tb.positions[idx] = DtzScoreRange::unknown();
+        tb.positions[checkmate_idx] = DtzScoreRange::unknown();
+
+        // First step marks the checkmate child.
+        tb.step();
+        // Second step propagates to the parent position.
+        tb.step();
+
+        let wdl: WdlScoreRange = tb.positions[idx].into();
+        assert_eq!(wdl, WdlScoreRange::Win);
     }
 }
