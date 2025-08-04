@@ -1,6 +1,6 @@
 use crate::material_key::MaterialKey;
 use crate::score::DtzScoreRange;
-use shakmaty::Position;
+use shakmaty::{Chess, Move, Position};
 
 pub struct TableBuilder {
     pub(crate) material: MaterialKey,
@@ -65,31 +65,7 @@ impl TableBuilder {
             let new_score = position
                 .legal_moves()
                 .into_iter()
-                .map(|chess_move| {
-                    let mut child_position = position.clone();
-                    child_position.play_unchecked(chess_move);
-
-                    // If the move isn't a capture, we are still in this table.
-                    if !chess_move.is_capture() {
-                        let child_index = self.material.position_to_index(&child_position).unwrap();
-                        self.positions[child_index].add_half_move()
-                    }
-                    // If the move is a capture, we are in a child table.
-                    // For now, we don't have child table probing, so we just
-                    // check if the child position is terminal and return the
-                    // appropriate score.
-                    else {
-                        if child_position.is_checkmate() {
-                            DtzScoreRange::checkmate()
-                        } else if child_position.is_stalemate()
-                            || child_position.is_insufficient_material()
-                        {
-                            DtzScoreRange::draw()
-                        } else {
-                            unimplemented!("Probing child tables not implemented");
-                        }
-                    }
-                })
+                .map(|mv| self.evaluate_move(&position, mv))
                 .reduce(|a, b| a.max(&b.flip()))
                 .expect("every non-terminal position should have at least one legal move");
 
@@ -99,6 +75,22 @@ impl TableBuilder {
             }
         }
         updates
+    }
+
+    fn evaluate_move(&self, position: &Chess, mv: Move) -> DtzScoreRange {
+        let mut child_position = position.clone();
+        child_position.play_unchecked(mv);
+
+        if !mv.is_capture() {
+            let child_index = self.material.position_to_index(&child_position).unwrap();
+            self.positions[child_index].add_half_move()
+        } else if child_position.is_checkmate() {
+            DtzScoreRange::checkmate()
+        } else if child_position.is_stalemate() || child_position.is_insufficient_material() {
+            DtzScoreRange::draw()
+        } else {
+            unimplemented!("Probing child tables not implemented");
+        }
     }
 }
 

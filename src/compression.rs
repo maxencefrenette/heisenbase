@@ -6,6 +6,20 @@ use crate::wdl_score_range::WdlScoreRange;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
+/// Node in the Huffman decoding tree.
+///
+/// Each leaf represents exactly one symbol and has no children. Internal nodes
+/// have their `left`/`right` child set but keep `symbol` as `None`. Traversing
+/// from the root by taking the left branch for a `0` bit and the right branch
+/// for a `1` mirrors the canonical code assignment, and decoding relies on these
+/// invariants to map a bit sequence back to the original symbol stream.
+#[derive(Default)]
+struct HuffmanNode {
+    left: Option<usize>,
+    right: Option<usize>,
+    symbol: Option<u16>,
+}
+
 /// Result of compressing a sequence of `WdlScoreRange` values.
 #[derive(Debug, Clone)]
 pub struct CompressedWdl {
@@ -66,64 +80,8 @@ pub fn compress_wdl(values: &[WdlScoreRange]) -> CompressedWdl {
 /// Decompress a previously compressed WDL table.
 pub fn decompress_wdl(data: &CompressedWdl) -> Vec<WdlScoreRange> {
     let codes = build_codes_from_lengths(&data.code_lens);
-
-    // Build a decoding tree from the codes
-    #[derive(Default)]
-    struct Node {
-        left: Option<usize>,
-        right: Option<usize>,
-        symbol: Option<u16>,
-    }
-
-    let mut nodes = vec![Node::default()]; // root
-    for (sym, (code, len)) in codes.iter().enumerate() {
-        let len = *len;
-        if len == 0 {
-            continue;
-        }
-        let mut idx = 0usize;
-        for i in (0..len).rev() {
-            let bit = (code >> i) & 1;
-            let next_idx = if bit == 0 {
-                nodes[idx].left
-            } else {
-                nodes[idx].right
-            };
-            if let Some(n) = next_idx {
-                idx = n;
-            } else {
-                nodes.push(Node::default());
-                let new_idx = nodes.len() - 1;
-                if bit == 0 {
-                    nodes[idx].left = Some(new_idx);
-                } else {
-                    nodes[idx].right = Some(new_idx);
-                }
-                idx = new_idx;
-            }
-        }
-        nodes[idx].symbol = Some(sym as u16);
-    }
-
-    // Decode bitstream into symbol sequence
-    let mut seq: Vec<u16> = Vec::new();
-    let mut idx = 0usize;
-    for bit_index in 0..data.bit_len {
-        let byte = data.bitstream[bit_index / 8];
-        let bit = (byte >> (7 - (bit_index % 8))) & 1;
-        idx = if bit == 0 {
-            nodes[idx].left.unwrap()
-        } else {
-            nodes[idx].right.unwrap()
-        };
-        if let Some(sym) = nodes[idx].symbol {
-            seq.push(sym);
-            idx = 0;
-            if seq.len() >= data.orig_len {
-                break;
-            }
-        }
-    }
+    let nodes = build_decoding_tree(&codes);
+    let seq = decode_bitstream(&data.bitstream, data.bit_len, &nodes, data.orig_len);
 
     // Expand symbols back to base values
     let mut output: Vec<u16> = Vec::new();
@@ -136,6 +94,73 @@ pub fn decompress_wdl(data: &CompressedWdl) -> Vec<WdlScoreRange> {
         .into_iter()
         .map(|v| WdlScoreRange::try_from(v as u8).expect("invalid wdl value"))
         .collect()
+}
+/// Build a Huffman decoding tree from `(code, length)` pairs.
+///
+/// The tree mirrors the canonical code assignment: a `0` bit takes the `left`
+/// branch and a `1` bit the `right`. Each code inserts a leaf node whose
+/// `symbol` field holds exactly one value and has no children, while internal
+/// nodes never store a `symbol`. Decoding walks this structure so that
+/// consuming the bits of a code always ends at its corresponding leaf.
+fn build_decoding_tree(codes: &[(u32, u8)]) -> Vec<HuffmanNode> {
+    let mut nodes = vec![HuffmanNode::default()]; // root
+    for (sym, &(code, len)) in codes.iter().enumerate() {
+        if len == 0 {
+            continue;
+        }
+
+        let mut idx = 0usize;
+        for i in (0..len).rev() {
+            let bit = (code >> i) & 1;
+            let next = if bit == 0 {
+                nodes[idx].left
+            } else {
+                nodes[idx].right
+            };
+
+            idx = if let Some(n) = next {
+                n
+            } else {
+                nodes.push(HuffmanNode::default());
+                let new_idx = nodes.len() - 1;
+                if bit == 0 {
+                    nodes[idx].left = Some(new_idx);
+                } else {
+                    nodes[idx].right = Some(new_idx);
+                }
+                new_idx
+            };
+        }
+        nodes[idx].symbol = Some(sym as u16);
+    }
+    nodes
+}
+
+fn decode_bitstream(
+    bitstream: &[u8],
+    bit_len: usize,
+    nodes: &[HuffmanNode],
+    orig_len: usize,
+) -> Vec<u16> {
+    let mut seq: Vec<u16> = Vec::new();
+    let mut idx = 0usize;
+    for bit_index in 0..bit_len {
+        let byte = bitstream[bit_index / 8];
+        let bit = (byte >> (7 - (bit_index % 8))) & 1;
+        idx = if bit == 0 {
+            nodes[idx].left.expect("missing left child")
+        } else {
+            nodes[idx].right.expect("missing right child")
+        };
+        if let Some(sym) = nodes[idx].symbol {
+            seq.push(sym);
+            if seq.len() >= orig_len {
+                break;
+            }
+            idx = 0;
+        }
+    }
+    seq
 }
 
 fn expand_symbol(sym: u16, sym_pairs: &[(u16, u16)], base: u16, out: &mut Vec<u16>) {
