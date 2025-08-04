@@ -570,4 +570,82 @@ mod tests {
         }
         assert!(found_invalid);
     }
+
+    #[test]
+    fn exhaustive_roundtrip_kvk() {
+        let mk = MaterialKey::from_string("KvK").unwrap();
+        for idx in 0..mk.total_positions() {
+            if let Ok(pos) = mk.index_to_position(idx) {
+                let roundtrip = mk.position_to_index(&pos).unwrap();
+                assert_eq!(idx, roundtrip);
+            }
+        }
+    }
+
+    #[test]
+    fn side_to_move_affects_index() {
+        use shakmaty::{CastlingMode, Chess, Color, Piece, Role, Setup, Square};
+
+        let mk = MaterialKey::from_string("KvK").unwrap();
+        let mut setup = Setup::empty();
+        setup.board.set_piece_at(
+            Square::E1,
+            Piece {
+                role: Role::King,
+                color: Color::White,
+            },
+        );
+        setup.board.set_piece_at(
+            Square::E8,
+            Piece {
+                role: Role::King,
+                color: Color::Black,
+            },
+        );
+
+        setup.turn = Color::White;
+        let white_pos = Chess::from_setup(setup.clone(), CastlingMode::Standard).unwrap();
+        let white_index = mk.position_to_index(&white_pos).unwrap();
+
+        setup.turn = Color::Black;
+        let black_pos = Chess::from_setup(setup, CastlingMode::Standard).unwrap();
+        let black_index = mk.position_to_index(&black_pos).unwrap();
+
+        assert_eq!(black_index, white_index + 1);
+        assert_eq!(white_index % 2, 0);
+        assert_eq!(black_index % 2, 1);
+
+        let reconstructed = mk.index_to_position(white_index + 1).unwrap();
+        assert_eq!(reconstructed.board(), white_pos.board());
+        assert_eq!(reconstructed.turn(), Color::Black);
+    }
+
+    #[test]
+    fn position_to_index_mismatched_material() {
+        use shakmaty::{CastlingMode, Chess, Color, Piece, Role, Setup, Square};
+
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        let mut setup = Setup::empty();
+        setup.board.set_piece_at(
+            Square::E1,
+            Piece {
+                role: Role::King,
+                color: Color::White,
+            },
+        );
+        setup.board.set_piece_at(
+            Square::E8,
+            Piece {
+                role: Role::King,
+                color: Color::Black,
+            },
+        );
+        setup.turn = Color::White;
+
+        let pos = Chess::from_setup(setup, CastlingMode::Standard).unwrap();
+        assert!(matches!(
+            mk.position_to_index(&pos),
+            Err(MaterialError::MismatchedMaterial)
+        ));
+    }
 }
