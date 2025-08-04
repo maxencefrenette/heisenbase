@@ -1,6 +1,6 @@
 use crate::material_key::MaterialKey;
 use crate::score::DtzScoreRange;
-use shakmaty::{Color, Position};
+use shakmaty::Position;
 
 pub struct TableBuilder {
     pub(crate) material: MaterialKey,
