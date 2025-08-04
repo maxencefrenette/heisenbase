@@ -73,7 +73,12 @@ impl TableBuilder {
                     if !chess_move.is_capture() {
                         let child_index = self.material.position_to_index(&child_position).unwrap();
                         self.positions[child_index].add_half_move()
-                    } else {
+                    }
+                    // If the move is a capture, we are in a child table.
+                    // For now, we don't have child table probing, so we just
+                    // check if the child position is terminal and return the
+                    // appropriate score.
+                    else {
                         if child_position.is_checkmate() {
                             DtzScoreRange::checkmate()
                         } else if child_position.is_stalemate()
