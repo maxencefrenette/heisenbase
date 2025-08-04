@@ -49,6 +49,18 @@ impl TableBuilder {
                 continue;
             }
 
+            if position.is_checkmate() {
+                self.positions[pos_index] = DtzScoreRange::checkmate();
+                updates += 1;
+                continue;
+            }
+
+            if position.is_stalemate() || position.is_insufficient_material() {
+                self.positions[pos_index] = DtzScoreRange::draw();
+                updates += 1;
+                continue;
+            }
+
             let new_score = position
                 .legal_moves()
                 .into_iter()
