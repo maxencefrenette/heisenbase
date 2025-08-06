@@ -1,4 +1,5 @@
 use crate::material_key::MaterialKey;
+use crate::position_map::{index_to_position, position_to_index, total_positions};
 use crate::score::DtzScoreRange;
 use shakmaty::{Chess, Move, Position};
 
@@ -9,7 +10,7 @@ pub struct TableBuilder {
 
 impl TableBuilder {
     pub fn new(material: MaterialKey) -> Self {
-        let positions = material.total_positions();
+        let positions = total_positions(&material);
 
         Self {
             material,
@@ -45,7 +46,7 @@ impl TableBuilder {
                 continue;
             }
 
-            let position = match self.material.index_to_position(pos_index) {
+            let position = match index_to_position(&self.material, pos_index) {
                 Ok(p) => p,
                 Err(_) => continue,
             };
@@ -82,7 +83,7 @@ impl TableBuilder {
         child_position.play_unchecked(mv);
 
         if !mv.is_capture() {
-            let child_index = self.material.position_to_index(&child_position).unwrap();
+            let child_index = position_to_index(&self.material, &child_position).unwrap();
             self.positions[child_index].add_half_move()
         } else if child_position.is_checkmate() {
             DtzScoreRange::checkmate()
@@ -113,14 +114,11 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
 
-        let index = tb.material.position_to_index(&position).unwrap();
-        let reconstructed = tb
-            .material
-            .index_to_position(index)
-            .expect("valid position");
+        let index = position_to_index(&tb.material, &position).unwrap();
+        let reconstructed = index_to_position(&tb.material, index).expect("valid position");
 
         assert_eq!(
-            tb.material.position_to_index(&reconstructed).unwrap(),
+            position_to_index(&tb.material, &reconstructed).unwrap(),
             index
         );
     }
@@ -144,8 +142,8 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
 
-        let checkmate_idx = tb.material.position_to_index(&checkmate).unwrap();
-        let stalemate_idx = tb.material.position_to_index(&stalemate).unwrap();
+        let checkmate_idx = position_to_index(&tb.material, &checkmate).unwrap();
+        let stalemate_idx = position_to_index(&tb.material, &stalemate).unwrap();
 
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
         tb.positions[stalemate_idx] = DtzScoreRange::unknown();
@@ -169,7 +167,7 @@ mod tests {
             .unwrap()
             .into_position(CastlingMode::Standard)
             .unwrap();
-        let idx = tb.material.position_to_index(&mate_in_one).unwrap();
+        let idx = position_to_index(&tb.material, &mate_in_one).unwrap();
 
         // Identify the checkmate position reached after Qb7#.
         let checkmate = "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1"
@@ -177,7 +175,7 @@ mod tests {
             .unwrap()
             .into_position(CastlingMode::Standard)
             .unwrap();
-        let checkmate_idx = tb.material.position_to_index(&checkmate).unwrap();
+        let checkmate_idx = position_to_index(&tb.material, &checkmate).unwrap();
 
         tb.positions[idx] = DtzScoreRange::unknown();
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();

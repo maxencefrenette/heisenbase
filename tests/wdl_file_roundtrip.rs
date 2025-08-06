@@ -1,6 +1,7 @@
 use heisenbase::{
     compression::{compress_wdl, decompress_wdl},
     material_key::MaterialKey,
+    position_map::{index_to_position, total_positions},
     wdl_file::{read_wdl_file, write_wdl_file},
     wdl_score_range::WdlScoreRange,
     wdl_table::WdlTable,
@@ -11,10 +12,10 @@ use shakmaty::Position;
 #[ignore]
 fn write_read_round_trip() {
     let material = MaterialKey::from_string("KQvK").unwrap();
-    let total = material.total_positions();
+    let total = total_positions(&material);
     let mut positions = Vec::with_capacity(total);
     for idx in 0..total {
-        let wdl = match material.index_to_position(idx) {
+        let wdl = match index_to_position(&material, idx) {
             Ok(position) => {
                 if position.is_checkmate() {
                     WdlScoreRange::Loss
