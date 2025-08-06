@@ -65,8 +65,8 @@ impl TableBuilder {
             let new_score = position
                 .legal_moves()
                 .into_iter()
-                .map(|mv| self.evaluate_move(&position, mv))
-                .reduce(|a, b| a.max(&b.flip()))
+                .map(|mv| self.evaluate_move(&position, mv).flip())
+                .reduce(|a, b| a.max(&b))
                 .expect("every non-terminal position should have at least one legal move");
 
             if new_score != old_score {
