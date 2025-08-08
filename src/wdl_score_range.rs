@@ -40,3 +40,15 @@ impl core::convert::TryFrom<u8> for WdlScoreRange {
         })
     }
 }
+
+impl WdlScoreRange {
+    /// Returns true if this score range represents a definite win, draw or loss.
+    pub fn is_certain(&self) -> bool {
+        matches!(self, Self::Win | Self::Draw | Self::Loss)
+    }
+
+    /// Returns true if this score range could represent multiple outcomes.
+    pub fn is_uncertain(&self) -> bool {
+        !self.is_certain()
+    }
+}
