@@ -22,3 +22,6 @@ target
 
 # Generated tablebase files
 data/
+
+# Syzygy tablebases
+syzygy/
