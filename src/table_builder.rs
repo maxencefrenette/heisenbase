@@ -1,4 +1,4 @@
-use crate::material_key::MaterialKey;
+use crate::material_key::{MaterialError, MaterialKey};
 use crate::position_map::{index_to_position, position_to_index, total_positions};
 use crate::score::DtzScoreRange;
 use shakmaty::{Chess, Move, Position};
@@ -42,13 +42,31 @@ impl TableBuilder {
         for pos_index in 0..self.positions.len() {
             let old_score = self.positions[pos_index];
 
+            if old_score.is_illegal() {
+                continue;
+            }
+
             if old_score.is_certain() {
                 continue;
             }
 
             let position = match index_to_position(&self.material, pos_index) {
                 Ok(p) => p,
-                Err(_) => continue,
+                Err(MaterialError::InvalidPosition(_)) => {
+                    if !self.positions[pos_index].is_illegal() {
+                        self.positions[pos_index] = DtzScoreRange::illegal();
+                        updates += 1;
+                    }
+                    continue;
+                }
+                Err(MaterialError::IndexOutOfBounds) => {
+                    debug_assert!(false, "index {} unexpectedly out of bounds", pos_index);
+                    continue;
+                }
+                Err(MaterialError::MismatchedMaterial) => {
+                    debug_assert!(false, "index {} has mismatched material", pos_index);
+                    continue;
+                }
             };
 
             if position.is_checkmate() {

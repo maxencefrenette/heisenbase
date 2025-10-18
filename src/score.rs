@@ -31,6 +31,14 @@ impl DtzScore {
     pub fn is_draw(&self) -> bool {
         self.0 == 0
     }
+
+    pub fn is_win(&self) -> bool {
+        self.0 > 0
+    }
+
+    pub fn is_loss(&self) -> bool {
+        self.0 < 0
+    }
 }
 
 impl DtzScore {
@@ -95,6 +103,13 @@ impl DtzScoreRange {
         }
     }
 
+    pub fn illegal() -> Self {
+        Self {
+            min: DtzScore::immediate_win(),
+            max: DtzScore::immediate_loss(),
+        }
+    }
+
     /// A checkmate is on the board. The side to move is checkmated.
     pub fn checkmate() -> Self {
         Self {
@@ -112,11 +127,15 @@ impl DtzScoreRange {
     }
 
     pub fn is_certain(&self) -> bool {
-        self.min == self.max
+        self.min == self.max || self.is_illegal()
     }
 
     pub fn is_uncertain(&self) -> bool {
         self.min != self.max
+    }
+
+    pub fn is_illegal(&self) -> bool {
+        self.min.is_win() && self.max.is_loss()
     }
 
     /// Flips the score range.
@@ -131,6 +150,9 @@ impl DtzScoreRange {
     }
 
     pub fn add_half_move(&self) -> Self {
+        if self.is_illegal() {
+            return *self;
+        }
         Self {
             min: self.min.add_half_move(),
             max: self.max.add_half_move(),
@@ -149,9 +171,9 @@ impl DtzScoreRange {
 impl From<DtzScoreRange> for WdlScoreRange {
     fn from(score: DtzScoreRange) -> Self {
         match (score.min.0.signum(), score.max.0.signum()) {
+            (1, -1) => WdlScoreRange::IllegalPosition,
             (1, 1) => WdlScoreRange::Win,
             (1, 0) => panic!("DtzScoreRange::into: min > 0 and max == 0"),
-            (1, -1) => panic!("DtzScoreRange::into: min > 0 and max < 0"),
             (0, 1) => WdlScoreRange::WinOrDraw,
             (0, 0) => WdlScoreRange::Draw,
             (0, -1) => panic!("DtzScoreRange::into: min == 0 and max < 0"),
