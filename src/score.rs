@@ -184,3 +184,32 @@ impl From<DtzScoreRange> for WdlScoreRange {
         }
     }
 }
+
+impl From<WdlScoreRange> for DtzScoreRange {
+    fn from(value: WdlScoreRange) -> Self {
+        match value {
+            WdlScoreRange::Unknown => DtzScoreRange::unknown(),
+            WdlScoreRange::WinOrDraw => Self {
+                min: DtzScore::draw(),
+                max: DtzScore::immediate_win(),
+            },
+            WdlScoreRange::DrawOrLoss => Self {
+                min: DtzScore::immediate_loss(),
+                max: DtzScore::draw(),
+            },
+            WdlScoreRange::Win => Self {
+                min: DtzScore::immediate_win(),
+                max: DtzScore::immediate_win(),
+            },
+            WdlScoreRange::Draw => Self {
+                min: DtzScore::draw(),
+                max: DtzScore::draw(),
+            },
+            WdlScoreRange::Loss => Self {
+                min: DtzScore::immediate_loss(),
+                max: DtzScore::immediate_loss(),
+            },
+            WdlScoreRange::IllegalPosition => DtzScoreRange::illegal(),
+        }
+    }
+}

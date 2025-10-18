@@ -29,6 +29,32 @@ fn main() {
         Commands::Generate { material_key } => {
             let material = MaterialKey::from_string(&material_key).expect("invalid material key");
             let mut table_builder = TableBuilder::new(material);
+            let loaded: Vec<String> = table_builder
+                .loaded_child_materials()
+                .iter()
+                .map(|k| k.to_string())
+                .collect();
+            let missing: Vec<String> = table_builder
+                .missing_child_materials()
+                .iter()
+                .map(|k| k.to_string())
+                .collect();
+            println!(
+                "Loaded child tables: {}",
+                if loaded.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    loaded.join(", ")
+                }
+            );
+            println!(
+                "Missing child tables: {}",
+                if missing.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    missing.join(", ")
+                }
+            );
             table_builder.solve();
             let wdl_table: WdlTable = table_builder.into();
             let total = wdl_table.positions.len() as f64;

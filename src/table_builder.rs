@@ -1,20 +1,62 @@
+use crate::compression::decompress_wdl;
 use crate::material_key::{MaterialError, MaterialKey};
 use crate::position_map::{index_to_position, position_to_index, total_positions};
 use crate::score::DtzScoreRange;
+use crate::wdl_file::read_wdl_file;
+use crate::wdl_score_range::WdlScoreRange;
 use shakmaty::{Chess, Move, Position};
+use std::collections::HashMap;
+use std::path::Path;
 
 pub struct TableBuilder {
     pub(crate) material: MaterialKey,
     pub(crate) positions: Vec<DtzScoreRange>,
+    pub(crate) child_tables: HashMap<MaterialKey, Vec<WdlScoreRange>>,
+    pub(crate) loaded_child_tables: Vec<MaterialKey>,
+    pub(crate) missing_child_tables: Vec<MaterialKey>,
 }
 
 impl TableBuilder {
     pub fn new(material: MaterialKey) -> Self {
+        Self::with_data_dir(material, Path::new("./data"))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_data_dir<P: AsRef<Path>>(material: MaterialKey, data_dir: P) -> Self {
+        Self::with_data_dir(material, data_dir.as_ref())
+    }
+
+    fn with_data_dir(material: MaterialKey, data_dir: &Path) -> Self {
         let positions = total_positions(&material);
+        let mut child_tables = HashMap::new();
+        let mut loaded_child_tables = Vec::new();
+        let mut missing_child_tables = Vec::new();
+
+        for child_key in material.child_material_keys() {
+            let path = data_dir.join(format!("{}.hbt", child_key));
+            match read_wdl_file(&path) {
+                Ok((file_key, compressed)) => {
+                    if file_key != child_key {
+                        // Skip mismatched tables but record them as missing to avoid surprises.
+                        missing_child_tables.push(child_key);
+                        continue;
+                    }
+                    let table = decompress_wdl(&compressed);
+                    child_tables.insert(child_key.clone(), table);
+                    loaded_child_tables.push(child_key);
+                }
+                Err(_) => {
+                    missing_child_tables.push(child_key);
+                }
+            }
+        }
 
         Self {
             material,
             positions: vec![DtzScoreRange::unknown(); positions],
+            child_tables,
+            loaded_child_tables,
+            missing_child_tables,
         }
     }
 
@@ -100,7 +142,9 @@ impl TableBuilder {
         let mut child_position = position.clone();
         child_position.play_unchecked(mv);
 
-        if !mv.is_capture() {
+        let is_promotion = mv.promotion().is_some();
+
+        if !mv.is_capture() && !is_promotion {
             let child_index = position_to_index(&self.material, &child_position).unwrap();
             self.positions[child_index].add_half_move()
         } else if child_position.is_checkmate() {
@@ -108,22 +152,57 @@ impl TableBuilder {
         } else if child_position.is_stalemate() || child_position.is_insufficient_material() {
             DtzScoreRange::draw()
         } else {
-            unimplemented!("Probing child tables not implemented");
+            if child_position.is_checkmate() {
+                return DtzScoreRange::checkmate();
+            }
+            if child_position.is_stalemate() || child_position.is_insufficient_material() {
+                return DtzScoreRange::draw();
+            }
+
+            let child_key = match MaterialKey::from_position(&child_position) {
+                Some(key) => key,
+                None => return DtzScoreRange::unknown(),
+            };
+            if let Some(table) = self.child_tables.get(&child_key) {
+                match position_to_index(&child_key, &child_position) {
+                    Ok(idx) => DtzScoreRange::from(table[idx]),
+                    Err(_) => DtzScoreRange::unknown(),
+                }
+            } else {
+                DtzScoreRange::unknown()
+            }
         }
+    }
+
+    pub fn loaded_child_materials(&self) -> &[MaterialKey] {
+        &self.loaded_child_tables
+    }
+
+    pub fn missing_child_materials(&self) -> &[MaterialKey] {
+        &self.missing_child_tables
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compression::compress_wdl;
+    use crate::position_map::total_positions;
+    use crate::wdl_file::write_wdl_file;
     use crate::wdl_score_range::WdlScoreRange;
     use shakmaty::{CastlingMode, fen::Fen};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn position_index_roundtrip() {
         let tb = TableBuilder {
             material: MaterialKey::from_string("KQvK").unwrap(),
             positions: Vec::new(),
+            child_tables: HashMap::new(),
+            loaded_child_tables: Vec::new(),
+            missing_child_tables: Vec::new(),
         };
 
         let position = "7k/8/8/8/8/8/8/KQ6 w - - 0 1"
@@ -205,5 +284,52 @@ mod tests {
 
         let wdl: WdlScoreRange = tb.positions[idx].into();
         assert_eq!(wdl, WdlScoreRange::Win);
+    }
+
+    fn temp_data_dir(prefix: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("heisenbase_{prefix}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn child_tables_report_missing_when_unavailable() {
+        let material = MaterialKey::from_string("KQvK").unwrap();
+        let data_dir = temp_data_dir("missing_child");
+        let tb = TableBuilder::new_with_data_dir(material, &data_dir);
+        assert!(tb.loaded_child_materials().is_empty());
+        let missing: Vec<String> = tb
+            .missing_child_materials()
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+        assert_eq!(missing, vec!["KvK".to_string()]);
+        fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn child_tables_load_available_files() {
+        let material = MaterialKey::from_string("KQvK").unwrap();
+        let data_dir = temp_data_dir("load_child");
+
+        let child_key = MaterialKey::from_string("KvK").unwrap();
+        let positions = vec![WdlScoreRange::Draw; total_positions(&child_key)];
+        let compressed = compress_wdl(&positions);
+        let path = data_dir.join("KvK.hbt");
+        write_wdl_file(&path, &child_key, &compressed).unwrap();
+
+        let tb = TableBuilder::new_with_data_dir(material, &data_dir);
+        let loaded: Vec<String> = tb
+            .loaded_child_materials()
+            .iter()
+            .map(|k| k.to_string())
+            .collect();
+        assert_eq!(loaded, vec!["KvK".to_string()]);
+        assert!(tb.missing_child_materials().is_empty());
+
+        fs::remove_file(path).unwrap();
+        fs::remove_dir_all(data_dir).unwrap();
     }
 }

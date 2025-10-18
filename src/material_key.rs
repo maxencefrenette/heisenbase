@@ -1,6 +1,7 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
-use shakmaty::{Color, PositionErrorKinds, Role};
+use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
 
 /// Represents a material configuration, e.g. `KQvK`.
 
@@ -71,7 +72,7 @@ pub(crate) const PIECES: [PieceDescriptor; 7] = [
     PieceDescriptor::Pawn,
 ];
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaterialKey {
     /// Piece counts indexed by color then piece descriptor.
     pub(crate) counts: [[u8; PIECES.len()]; 2],
@@ -85,6 +86,10 @@ pub enum MaterialError {
 }
 
 impl MaterialKey {
+    pub(crate) fn new(counts: [[u8; PIECES.len()]; 2]) -> Self {
+        Self { counts }
+    }
+
     /// Parse a [`MaterialKey`] from its textual representation.
     ///
     /// # Syntax
@@ -178,6 +183,92 @@ impl MaterialKey {
 
         Some(Self { counts })
     }
+
+    pub(crate) fn child_material_keys(&self) -> Vec<MaterialKey> {
+        let mut children = BTreeSet::new();
+
+        // Captures: any move that removes an opponent piece (except the king).
+        for color_idx in 0..2 {
+            let opponent = 1 - color_idx;
+            for piece_idx in 0..PIECES.len() {
+                if piece_idx == PieceDescriptor::King as usize {
+                    continue;
+                }
+                if self.counts[opponent][piece_idx] == 0 {
+                    continue;
+                }
+                let mut counts = self.counts;
+                counts[opponent][piece_idx] -= 1;
+                children.insert(MaterialKey::new(counts));
+            }
+        }
+
+        // Promotions (with and without capture).
+        let promo_targets = [
+            PieceDescriptor::Queen,
+            PieceDescriptor::Rook,
+            PieceDescriptor::LightBishop,
+            PieceDescriptor::DarkBishop,
+            PieceDescriptor::Knight,
+        ];
+        let pawn_idx = PieceDescriptor::Pawn as usize;
+        for color_idx in 0..2 {
+            if self.counts[color_idx][pawn_idx] == 0 {
+                continue;
+            }
+            let opponent = 1 - color_idx;
+            for target in promo_targets {
+                let target_idx = target as usize;
+                let mut promo_counts = self.counts;
+                promo_counts[color_idx][pawn_idx] -= 1;
+                promo_counts[color_idx][target_idx] += 1;
+                children.insert(MaterialKey::new(promo_counts));
+
+                for capture_idx in 0..PIECES.len() {
+                    if capture_idx == PieceDescriptor::King as usize {
+                        continue;
+                    }
+                    if self.counts[opponent][capture_idx] == 0 {
+                        continue;
+                    }
+                    let mut capture_counts = promo_counts;
+                    capture_counts[opponent][capture_idx] -= 1;
+                    children.insert(MaterialKey::new(capture_counts));
+                }
+            }
+        }
+
+        children.into_iter().collect()
+    }
+
+    pub(crate) fn from_position(position: &Chess) -> Option<Self> {
+        let mut counts = [[0u8; PIECES.len()]; 2];
+        for square in Square::ALL {
+            if let Some(piece) = position.board().piece_at(square) {
+                let color_idx = match piece.color {
+                    Color::White => 0,
+                    Color::Black => 1,
+                };
+                let piece_idx = match piece.role {
+                    Role::King => PieceDescriptor::King as usize,
+                    Role::Queen => PieceDescriptor::Queen as usize,
+                    Role::Rook => PieceDescriptor::Rook as usize,
+                    Role::Bishop => {
+                        if square.is_light() {
+                            PieceDescriptor::LightBishop as usize
+                        } else {
+                            PieceDescriptor::DarkBishop as usize
+                        }
+                    }
+                    Role::Knight => PieceDescriptor::Knight as usize,
+                    Role::Pawn => PieceDescriptor::Pawn as usize,
+                };
+                counts[color_idx][piece_idx] += 1;
+            }
+        }
+
+        Some(MaterialKey::new(counts))
+    }
 }
 
 impl fmt::Display for MaterialKey {
@@ -201,6 +292,8 @@ impl fmt::Display for MaterialKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shakmaty::{CastlingMode, fen::Fen};
+    use std::collections::BTreeSet;
 
     #[test]
     fn parses_kqvk() {
@@ -222,5 +315,31 @@ mod tests {
     #[test]
     fn rejects_missing_separator() {
         assert!(MaterialKey::from_string("KQK").is_none());
+    }
+
+    #[test]
+    fn child_keys_for_kpvk() {
+        let key = MaterialKey::from_string("KPvK").unwrap();
+        let children: BTreeSet<String> = key
+            .child_material_keys()
+            .into_iter()
+            .map(|k| k.to_string())
+            .collect();
+        let expected: BTreeSet<String> = ["KvK", "KQvK", "KRvK", "KBlvK", "KBdvK", "KNvK"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(children, expected);
+    }
+
+    #[test]
+    fn material_key_from_position_matches_counts() {
+        let position = "8/4k3/8/8/8/8/3P4/4K3 w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let key = MaterialKey::from_position(&position).unwrap();
+        assert_eq!(key.to_string(), "KPvK");
     }
 }
