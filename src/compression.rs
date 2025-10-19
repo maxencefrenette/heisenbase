@@ -43,7 +43,12 @@ pub struct CompressedWdl {
 /// Huffman coding.
 pub fn compress_wdl(values: &[WdlScoreRange]) -> CompressedWdl {
     let base_symbols = 7u16; // number of possible WDL values
-    let seq: Vec<u16> = values.iter().map(|&v| u16::from(u8::from(v))).collect();
+    let mut raw: Vec<u8> = values.iter().map(|&v| u8::from(v)).collect();
+    let illegal_code = u8::from(WdlScoreRange::IllegalPosition);
+
+    rewrite_illegal_runs(&mut raw, illegal_code);
+
+    let seq: Vec<u16> = raw.into_iter().map(u16::from).collect();
 
     let (seq, sym_pairs) = pair_substitution(seq, base_symbols);
 
@@ -170,6 +175,67 @@ fn expand_symbol(sym: u16, sym_pairs: &[(u16, u16)], base: u16, out: &mut Vec<u1
         let (a, b) = sym_pairs[(sym - base) as usize];
         expand_symbol(a, sym_pairs, base, out);
         expand_symbol(b, sym_pairs, base, out);
+    }
+}
+
+fn rewrite_illegal_runs(seq: &mut [u8], illegal_code: u8) {
+    let len = seq.len();
+    let fallback = u8::from(WdlScoreRange::Draw);
+    let mut i = 0usize;
+    while i < len {
+        if seq[i] != illegal_code {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        while i < len && seq[i] == illegal_code {
+            i += 1;
+        }
+        let end = i;
+
+        let left = if start > 0 {
+            Some(seq[start - 1])
+        } else {
+            None
+        };
+        let right = if end < len { Some(seq[end]) } else { None };
+
+        let replacement = match (left, right) {
+            (Some(l), Some(r)) if l == r => l,
+            (Some(l), Some(r)) => {
+                let mut left_len = 0usize;
+                let mut idx = start;
+                while idx > 0 {
+                    idx -= 1;
+                    if seq[idx] == l {
+                        left_len += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                let mut right_len = 0usize;
+                let mut idx = end;
+                while idx < len {
+                    if seq[idx] == r {
+                        right_len += 1;
+                        idx += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if left_len >= right_len { l } else { r }
+            }
+            (Some(l), None) => l,
+            (None, Some(r)) => r,
+            (None, None) => fallback,
+        };
+
+        for value in &mut seq[start..end] {
+            *value = replacement;
+        }
     }
 }
 
