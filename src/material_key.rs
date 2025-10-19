@@ -87,7 +87,9 @@ pub enum MaterialError {
 
 impl MaterialKey {
     pub(crate) fn new(counts: [[u8; PIECES.len()]; 2]) -> Self {
-        Self { counts }
+        let mut key = Self { counts };
+        key.canonicalize();
+        key
     }
 
     /// Parse a [`MaterialKey`] from its textual representation.
@@ -181,7 +183,95 @@ impl MaterialKey {
         push_pieces(&mut counts, white, Color::White)?;
         push_pieces(&mut counts, black, Color::Black)?;
 
-        Some(Self { counts })
+        Some(Self::new(counts))
+    }
+
+    fn canonicalize(&mut self) {
+        if self.should_swap_bishops() {
+            self.flip_bishop_colors();
+        }
+    }
+
+    fn should_swap_bishops(&self) -> bool {
+        if self.has_pawns() {
+            return false;
+        }
+
+        let light_idx = PieceDescriptor::LightBishop as usize;
+        let dark_idx = PieceDescriptor::DarkBishop as usize;
+
+        let total_bishops: u16 = (self.counts[0][light_idx] as u16)
+            + (self.counts[0][dark_idx] as u16)
+            + (self.counts[1][light_idx] as u16)
+            + (self.counts[1][dark_idx] as u16);
+        if total_bishops == 0 {
+            return false;
+        }
+
+        let current = Self::flatten_counts(&self.counts);
+        let swapped_counts = Self::swapped_bishop_counts(&self.counts);
+        let swapped = Self::flatten_counts(&swapped_counts);
+        swapped < current
+    }
+
+    fn flip_bishop_colors(&mut self) {
+        let light_idx = PieceDescriptor::LightBishop as usize;
+        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        for color_idx in 0..2 {
+            let light = self.counts[color_idx][light_idx];
+            let dark = self.counts[color_idx][dark_idx];
+            self.counts[color_idx][light_idx] = dark;
+            self.counts[color_idx][dark_idx] = light;
+        }
+    }
+
+    fn swapped_bishop_counts(counts: &[[u8; PIECES.len()]; 2]) -> [[u8; PIECES.len()]; 2] {
+        let mut swapped = *counts;
+        let light_idx = PieceDescriptor::LightBishop as usize;
+        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        for color_idx in 0..2 {
+            swapped[color_idx][light_idx] = counts[color_idx][dark_idx];
+            swapped[color_idx][dark_idx] = counts[color_idx][light_idx];
+        }
+        swapped
+    }
+
+    fn flatten_counts(counts: &[[u8; PIECES.len()]; 2]) -> [u8; PIECES.len() * 2] {
+        let mut flat = [0u8; PIECES.len() * 2];
+        for color_idx in 0..2 {
+            for piece_idx in 0..PIECES.len() {
+                flat[color_idx * PIECES.len() + piece_idx] = counts[color_idx][piece_idx];
+            }
+        }
+        flat
+    }
+
+    pub(crate) fn has_pawns(&self) -> bool {
+        let pawn_idx = PieceDescriptor::Pawn as usize;
+        self.counts[0][pawn_idx] > 0 || self.counts[1][pawn_idx] > 0
+    }
+
+    pub(crate) fn strong_color(&self) -> Color {
+        let order = [
+            PieceDescriptor::Queen as usize,
+            PieceDescriptor::Rook as usize,
+            PieceDescriptor::LightBishop as usize,
+            PieceDescriptor::DarkBishop as usize,
+            PieceDescriptor::Knight as usize,
+            PieceDescriptor::Pawn as usize,
+        ];
+
+        for &idx in &order {
+            let white = self.counts[0][idx];
+            let black = self.counts[1][idx];
+            if white > black {
+                return Color::White;
+            } else if black > white {
+                return Color::Black;
+            }
+        }
+
+        Color::White
     }
 
     pub(crate) fn child_material_keys(&self) -> Vec<MaterialKey> {
@@ -273,12 +363,46 @@ impl MaterialKey {
 
 impl fmt::Display for MaterialKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn write_bishops(f: &mut fmt::Formatter<'_>, light: u8, dark: u8) -> fmt::Result {
+            if light < dark {
+                for _ in 0..dark {
+                    write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
+                }
+                for _ in 0..light {
+                    write!(f, "{}", PieceDescriptor::LightBishop.token())?;
+                }
+            } else {
+                for _ in 0..light {
+                    write!(f, "{}", PieceDescriptor::LightBishop.token())?;
+                }
+                for _ in 0..dark {
+                    write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
+                }
+            }
+            Ok(())
+        }
+
+        let light_idx = PieceDescriptor::LightBishop as usize;
+        let dark_idx = PieceDescriptor::DarkBishop as usize;
+
         for color_idx in 0..2 {
             if color_idx == 1 {
                 write!(f, "v")?;
             }
 
             for (i, pd) in PIECES.iter().enumerate() {
+                if i == light_idx {
+                    let light = self.counts[color_idx][light_idx];
+                    let dark = self.counts[color_idx][dark_idx];
+                    if light == 0 && dark == 0 {
+                        continue;
+                    }
+                    write_bishops(f, light, dark)?;
+                    continue;
+                } else if i == dark_idx {
+                    continue;
+                }
+
                 for _ in 0..self.counts[color_idx][i] {
                     write!(f, "{}", pd.token())?;
                 }
@@ -308,6 +432,12 @@ mod tests {
     }
 
     #[test]
+    fn canonicalizes_bishop_colors_in_material_key() {
+        let mk = MaterialKey::from_string("KBlvKBd").unwrap();
+        assert_eq!(mk.to_string(), "KBdvKBl");
+    }
+
+    #[test]
     fn rejects_invalid_char() {
         assert!(MaterialKey::from_string("KXvK").is_none());
     }
@@ -325,7 +455,7 @@ mod tests {
             .into_iter()
             .map(|k| k.to_string())
             .collect();
-        let expected: BTreeSet<String> = ["KvK", "KQvK", "KRvK", "KBlvK", "KBdvK", "KNvK"]
+        let expected: BTreeSet<String> = ["KvK", "KQvK", "KRvK", "KBdvK", "KNvK"]
             .into_iter()
             .map(String::from)
             .collect();
@@ -333,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn material_key_from_position_matches_counts() {
+    fn material_key_from_position() {
         let position = "8/4k3/8/8/8/8/3P4/4K3 w - - 0 1"
             .parse::<Fen>()
             .unwrap()
@@ -341,5 +471,17 @@ mod tests {
             .unwrap();
         let key = MaterialKey::from_position(&position).unwrap();
         assert_eq!(key.to_string(), "KPvK");
+    }
+
+    #[test]
+    fn material_key_flips_bishop_colors_1() {
+        let key = MaterialKey::from_string("KBlvKBd").unwrap();
+        assert_eq!(key.to_string(), "KBdvKBl");
+    }
+
+    #[test]
+    fn material_key_flips_bishop_colors_2() {
+        let key = MaterialKey::from_string("KBlBlBdvK").unwrap();
+        assert_eq!(key.to_string(), "KBdBdBlvK");
     }
 }
