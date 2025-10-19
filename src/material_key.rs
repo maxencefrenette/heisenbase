@@ -191,6 +191,7 @@ impl MaterialKey {
         if self.should_swap_bishops() {
             self.flip_bishop_colors();
         }
+        self.ensure_strong_white();
     }
 
     fn should_swap_bishops(&self) -> bool {
@@ -254,24 +255,53 @@ impl MaterialKey {
             || self.counts[1][dark_idx] > 0
     }
 
-    pub(crate) fn strong_color(&self) -> Color {
-        let order = [
-            PieceDescriptor::Queen as usize,
-            PieceDescriptor::Rook as usize,
-            PieceDescriptor::LightBishop as usize,
-            PieceDescriptor::DarkBishop as usize,
-            PieceDescriptor::Knight as usize,
-            PieceDescriptor::Pawn as usize,
-        ];
+    fn ensure_strong_white(&mut self) {
+        if Self::strong_color_from_counts(&self.counts).is_black() {
+            self.swap_colors();
+        }
+    }
 
-        for &idx in &order {
-            let white = self.counts[0][idx];
-            let black = self.counts[1][idx];
+    fn swap_colors(&mut self) {
+        self.counts.swap(0, 1);
+    }
+
+    fn strong_color_from_counts(counts: &[[u8; PIECES.len()]; 2]) -> Color {
+        let compare = |white: u8, black: u8| -> Option<Color> {
             if white > black {
-                return Color::White;
+                Some(Color::White)
             } else if black > white {
-                return Color::Black;
+                Some(Color::Black)
+            } else {
+                None
             }
+        };
+
+        let queen_idx = PieceDescriptor::Queen as usize;
+        if let Some(color) = compare(counts[0][queen_idx], counts[1][queen_idx]) {
+            return color;
+        }
+
+        let rook_idx = PieceDescriptor::Rook as usize;
+        if let Some(color) = compare(counts[0][rook_idx], counts[1][rook_idx]) {
+            return color;
+        }
+
+        let light_idx = PieceDescriptor::LightBishop as usize;
+        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        let white_bishops = counts[0][light_idx] + counts[0][dark_idx];
+        let black_bishops = counts[1][light_idx] + counts[1][dark_idx];
+        if let Some(color) = compare(white_bishops, black_bishops) {
+            return color;
+        }
+
+        let knight_idx = PieceDescriptor::Knight as usize;
+        if let Some(color) = compare(counts[0][knight_idx], counts[1][knight_idx]) {
+            return color;
+        }
+
+        let pawn_idx = PieceDescriptor::Pawn as usize;
+        if let Some(color) = compare(counts[0][pawn_idx], counts[1][pawn_idx]) {
+            return color;
         }
 
         Color::White

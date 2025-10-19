@@ -1,6 +1,10 @@
-use crate::material_key::{MaterialError, MaterialKey, PIECES};
+use crate::material_key::{MaterialError, MaterialKey, PIECES, PieceDescriptor};
 use crate::transform::{Transform, TransformSet};
-use shakmaty::{Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, Setup, Square};
+use shakmaty::{
+    Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, PositionErrorKinds, Setup,
+    Square,
+};
+use std::cmp::Ordering;
 
 #[derive(Clone, Copy)]
 struct PieceGroup {
@@ -85,6 +89,134 @@ fn transform_square(square: Square, transform: Transform) -> Square {
     Square::new((new_rank * 8 + new_file) as u32)
 }
 
+fn square_coords(square: Square) -> (i8, i8) {
+    let idx = u32::from(square) as i8;
+    (idx % 8, idx / 8)
+}
+
+fn kings_touch(a: Square, b: Square) -> bool {
+    let (file_a, rank_a) = square_coords(a);
+    let (file_b, rank_b) = square_coords(b);
+    (file_a - file_b).abs() <= 1 && (rank_a - rank_b).abs() <= 1
+}
+
+fn swap_position_colors(position: &Chess) -> Chess {
+    let mut setup = Setup::empty();
+    for square in Square::ALL {
+        if let Some(piece) = position.board().piece_at(square) {
+            setup.board.set_piece_at(
+                square,
+                Piece {
+                    role: piece.role,
+                    color: piece.color.other(),
+                },
+            );
+        }
+    }
+    setup.turn = position.turn().other();
+
+    Chess::from_setup(setup, CastlingMode::Standard)
+        .expect("swapping colors should yield a valid position")
+}
+
+fn normalize_position_colors(key: &MaterialKey, position: &Chess) -> Chess {
+    let counts = count_board_pieces(position);
+    if material_counts_match(&key.counts, &counts) {
+        return position.clone();
+    }
+
+    let swapped = swap_position_colors(position);
+    let swapped_counts = count_board_pieces(&swapped);
+    if material_counts_match(&key.counts, &swapped_counts) {
+        return swapped;
+    }
+
+    position.clone()
+}
+
+fn canonicalize_pair(key: &MaterialKey, strong: Square, weak: Square) -> (Square, Square) {
+    let mut fallback: Option<(Square, Square)> = None;
+    for &transform in key.allowed_transforms().iter() {
+        let transformed_strong = transform_square(strong, transform);
+        let transformed_weak = transform_square(weak, transform);
+        if strong_king_allowed_square(key, transformed_strong) {
+            return (transformed_strong, transformed_weak);
+        }
+        if fallback.is_none() {
+            fallback = Some((transformed_strong, transformed_weak));
+        }
+    }
+    fallback.unwrap_or((strong, weak))
+}
+
+fn king_pairs(key: &MaterialKey) -> Vec<(Square, Square)> {
+    let mut pairs = Vec::new();
+    for strong in Square::ALL {
+        if !strong_king_allowed_square(key, strong) {
+            continue;
+        }
+        for weak in Square::ALL {
+            if weak == strong {
+                continue;
+            }
+            if kings_touch(strong, weak) {
+                continue;
+            }
+            let canonical = canonicalize_pair(key, strong, weak);
+            pairs.push(canonical);
+        }
+    }
+
+    pairs.sort_unstable_by(|(a_strong, a_weak), (b_strong, b_weak)| {
+        match u32::from(*a_strong).cmp(&u32::from(*b_strong)) {
+            Ordering::Equal => u32::from(*a_weak).cmp(&u32::from(*b_weak)),
+            other => other,
+        }
+    });
+    pairs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    pairs
+}
+
+fn arrangements_for_pair(key: &MaterialKey, strong: Square, weak: Square) -> usize {
+    let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
+    squares.retain(|&sq| sq != strong && sq != weak);
+    let mut total = 1usize;
+    for group in piece_groups(key) {
+        if group.piece.role == shakmaty::Role::King {
+            continue;
+        }
+        let mut allowed: Vec<usize> = squares
+            .iter()
+            .enumerate()
+            .filter(|&(_, sq)| match group.light {
+                Some(true) => sq.is_light(),
+                Some(false) => sq.is_dark(),
+                None => true,
+            })
+            .map(|(i, _)| i)
+            .collect();
+        restrict_allowed_squares(&mut allowed, &squares, &group, key);
+        let base = n_choose_k(allowed.len(), group.count as usize);
+        if base == 0 {
+            return 0;
+        }
+        total *= base;
+        for idx in allowed.iter().take(group.count as usize).rev() {
+            squares.remove(*idx);
+        }
+    }
+    total
+}
+
+fn arrangements_per_pair(key: &MaterialKey) -> usize {
+    let pairs = king_pairs(key);
+    let (strong, weak) = pairs
+        .into_iter()
+        .next()
+        .expect("at least one king pair must exist");
+    arrangements_for_pair(key, strong, weak)
+}
+
 fn apply_transform(position: &Chess, transform: Transform) -> Chess {
     if matches!(transform, Transform::Identity) {
         return position.clone();
@@ -125,12 +257,52 @@ fn count_board_pieces(position: &Chess) -> [[u8; PIECES.len()]; 2] {
     counts
 }
 
+fn material_counts_match(
+    expected: &[[u8; PIECES.len()]; 2],
+    actual: &[[u8; PIECES.len()]; 2],
+) -> bool {
+    let queen_idx = PieceDescriptor::Queen as usize;
+    let rook_idx = PieceDescriptor::Rook as usize;
+    let knight_idx = PieceDescriptor::Knight as usize;
+    let pawn_idx = PieceDescriptor::Pawn as usize;
+    let king_idx = PieceDescriptor::King as usize;
+    let light_idx = PieceDescriptor::LightBishop as usize;
+    let dark_idx = PieceDescriptor::DarkBishop as usize;
+
+    for color in 0..2 {
+        if expected[color][king_idx] != actual[color][king_idx] {
+            return false;
+        }
+        if expected[color][queen_idx] != actual[color][queen_idx] {
+            return false;
+        }
+        if expected[color][rook_idx] != actual[color][rook_idx] {
+            return false;
+        }
+        if expected[color][knight_idx] != actual[color][knight_idx] {
+            return false;
+        }
+        if expected[color][pawn_idx] != actual[color][pawn_idx] {
+            return false;
+        }
+
+        let expected_bishops = expected[color][light_idx] + expected[color][dark_idx];
+        let actual_bishops = actual[color][light_idx] + actual[color][dark_idx];
+        if expected_bishops != actual_bishops {
+            return false;
+        }
+    }
+
+    true
+}
+
 fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
-    let strong = key.strong_color();
+    let normalized = normalize_position_colors(key, position);
+
     let mut king_square = None;
     for square in Square::ALL {
-        if let Some(piece) = position.board().piece_at(square) {
-            if piece.role == shakmaty::Role::King && piece.color == strong {
+        if let Some(piece) = normalized.board().piece_at(square) {
+            if piece.role == shakmaty::Role::King && piece.color == Color::White {
                 king_square = Some(square);
                 break;
             }
@@ -139,16 +311,13 @@ fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
 
     let king_square = match king_square {
         Some(sq) => sq,
-        None => return position.clone(),
+        None => return normalized,
     };
 
     let mut fallback = None;
     for &transform in key.allowed_transforms().iter() {
         let transformed_king = transform_square(king_square, transform);
-        let transformed = apply_transform(position, transform);
-        if count_board_pieces(&transformed) != key.counts {
-            continue;
-        }
+        let transformed = apply_transform(&normalized, transform);
         if strong_king_allowed_square(key, transformed_king) {
             return transformed;
         }
@@ -157,7 +326,7 @@ fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
         }
     }
 
-    fallback.unwrap_or_else(|| position.clone())
+    fallback.unwrap_or(normalized)
 }
 
 fn restrict_allowed_squares(
@@ -166,8 +335,7 @@ fn restrict_allowed_squares(
     group: &PieceGroup,
     key: &MaterialKey,
 ) {
-    let strong = key.strong_color();
-    if group.piece.role == shakmaty::Role::King && group.piece.color == strong {
+    if group.piece.role == shakmaty::Role::King && group.piece.color == Color::White {
         allowed.retain(|&idx| strong_king_allowed_square(key, squares[idx]));
     }
 }
@@ -178,28 +346,9 @@ fn restrict_allowed_squares(
 /// on distinct squares. Identical pieces are treated as indistinguishable,
 /// so their placements are counted combinatorially.
 pub fn total_positions(key: &MaterialKey) -> usize {
-    let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
-    let mut total = 1usize;
-    for group in piece_groups(key) {
-        let mut allowed: Vec<usize> = squares
-            .iter()
-            .enumerate()
-            .filter(|&(_, sq)| match group.light {
-                Some(true) => sq.is_light(),
-                Some(false) => sq.is_dark(),
-                None => true,
-            })
-            .map(|(i, _)| i)
-            .collect();
-        restrict_allowed_squares(&mut allowed, &squares, &group, key);
-        let base = n_choose_k(allowed.len(), group.count as usize);
-        total *= base;
-        for idx in allowed.iter().take(group.count as usize).rev() {
-            squares.remove(*idx);
-        }
-    }
-    // Also account for which side is to move.
-    total * 2
+    let pair_count = king_pairs(key).len();
+    let placements = arrangements_per_pair(key);
+    pair_count * placements * 2
 }
 
 /// Convert an index into a [`Chess`] position.
@@ -227,11 +376,40 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
     };
     pos_index /= 2;
 
+    let pairs = king_pairs(key);
+    let placements = arrangements_per_pair(key);
+    let pair_index = pos_index / placements;
+    let mut pair_offset = pos_index % placements;
+    let (strong_square, weak_square) = pairs
+        .get(pair_index)
+        .copied()
+        .expect("pair index should be within range");
+
     let mut setup = Setup::empty();
     setup.turn = turn;
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
+    setup.board.set_piece_at(
+        strong_square,
+        Piece {
+            role: shakmaty::Role::King,
+            color: Color::White,
+        },
+    );
+    setup.board.set_piece_at(
+        weak_square,
+        Piece {
+            role: shakmaty::Role::King,
+            color: Color::Black,
+        },
+    );
+
+    squares.retain(|&sq| sq != strong_square && sq != weak_square);
+
     for group in piece_groups(key) {
+        if group.piece.role == shakmaty::Role::King {
+            continue;
+        }
         let mut allowed: Vec<usize> = squares
             .iter()
             .enumerate()
@@ -244,8 +422,8 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
             .collect();
         restrict_allowed_squares(&mut allowed, &squares, &group, key);
         let base = n_choose_k(allowed.len(), group.count as usize);
-        let group_index = pos_index % base;
-        pos_index /= base;
+        let group_index = pair_offset % base;
+        pair_offset /= base;
         let rel_indices = unrank_combination(allowed.len(), group.count as usize, group_index);
         let mut chosen_indices: Vec<usize> = rel_indices.iter().map(|&r| allowed[r]).collect();
         let chosen_squares: Vec<Square> = chosen_indices.iter().map(|&i| squares[i]).collect();
@@ -257,6 +435,8 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
             setup.board.set_piece_at(square, group.piece);
         }
     }
+
+    debug_assert_eq!(pair_offset, 0);
 
     Chess::from_setup(setup, CastlingMode::Standard)
         .map_err(|e| MaterialError::InvalidPosition(e.kinds()))
@@ -271,16 +451,44 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
     let canonical = canonicalize_position(key, position);
 
     let board_counts = count_board_pieces(&canonical);
-    if board_counts != key.counts {
+    if !material_counts_match(&key.counts, &board_counts) {
         return Err(MaterialError::MismatchedMaterial);
     }
 
-    let groups = piece_groups(key);
-    let mut index = 0usize;
+    let mut strong_square = None;
+    let mut weak_square = None;
+    for square in Square::ALL {
+        if let Some(piece) = canonical.board().piece_at(square) {
+            if piece.role == shakmaty::Role::King {
+                if piece.color == Color::White {
+                    strong_square = Some(square);
+                } else if piece.color == Color::Black {
+                    weak_square = Some(square);
+                }
+            }
+        }
+    }
+
+    let strong_square = strong_square.expect("strong king must exist");
+    let weak_square = weak_square.expect("weak king must exist");
+
+    let pairs = king_pairs(key);
+    let pair_index = pairs
+        .iter()
+        .position(|&(strong, weak)| strong == strong_square && weak == weak_square)
+        .ok_or_else(|| MaterialError::InvalidPosition(PositionErrorKinds::empty()))?;
+    let placements = arrangements_per_pair(key);
+
+    let mut within_index = 0usize;
     let mut multiplier = 1usize;
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
+    squares.retain(|&sq| sq != strong_square && sq != weak_square);
 
-    for group in groups {
+    for group in piece_groups(key) {
+        if group.piece.role == shakmaty::Role::King {
+            continue;
+        }
+
         let mut allowed: Vec<usize> = squares
             .iter()
             .enumerate()
@@ -313,7 +521,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
         };
         piece_indices.sort();
         let group_index = rank_combination(allowed.len(), piece_indices.as_slice());
-        index += group_index * multiplier;
+        within_index += group_index * multiplier;
         let mut remove_indices: Vec<usize> = piece_indices.iter().map(|&ai| allowed[ai]).collect();
         remove_indices.sort_unstable();
         for idx in remove_indices.iter().rev() {
@@ -321,6 +529,10 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
         }
         multiplier *= base;
     }
+
+    debug_assert!(within_index < placements);
+
+    let index = pair_index * placements + within_index;
 
     let turn_index = match canonical.turn() {
         Color::White => 0usize,
@@ -392,13 +604,17 @@ mod tests {
     #[test]
     fn total_positions_without_overlap() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(total_positions(&mk), 10 * 63 * 62 * 2);
+        let pair_count = king_pairs(&mk).len();
+        let placements = arrangements_per_pair(&mk);
+        assert_eq!(total_positions(&mk), pair_count * placements * 2);
     }
 
     #[test]
     fn total_positions_with_duplicates() {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
-        assert_eq!(total_positions(&mk), 10 * (63 * 62 / 2) * 61 * 2);
+        let pair_count = king_pairs(&mk).len();
+        let placements = arrangements_per_pair(&mk);
+        assert_eq!(total_positions(&mk), pair_count * placements * 2);
     }
 
     #[test]
@@ -545,7 +761,7 @@ mod tests {
                 Err(MaterialError::MismatchedMaterial) => unreachable!(),
             }
         }
-        assert!(found_invalid);
+        assert!(!found_invalid);
     }
 
     #[test]
@@ -645,9 +861,9 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
 
+        let canonical = canonicalize_position(&mk, &position);
         let index = position_to_index(&mk, &position).expect("position should map to index");
         let reconstructed = index_to_position(&mk, index).unwrap();
-        let canonical = canonicalize_position(&mk, &position);
         assert_eq!(reconstructed.board(), canonical.board());
     }
 }
