@@ -1,4 +1,5 @@
 use crate::material_key::{MaterialError, MaterialKey, PIECES};
+use crate::transform::Transform;
 use shakmaty::{Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, Setup, Square};
 
 #[derive(Clone, Copy)]
@@ -28,19 +29,6 @@ fn piece_groups(key: &MaterialKey) -> Vec<PieceGroup> {
     groups
 }
 
-const WEDGE_SQUARES: [Square; 10] = [
-    Square::B1,
-    Square::C1,
-    Square::D1,
-    Square::C2,
-    Square::D2,
-    Square::D3,
-    Square::A1,
-    Square::B2,
-    Square::C3,
-    Square::D4,
-];
-
 fn is_in_wedge(square: Square) -> bool {
     matches!(
         square,
@@ -57,34 +45,26 @@ fn is_in_wedge(square: Square) -> bool {
     )
 }
 
-fn wedge_index(square: Square) -> Option<usize> {
-    WEDGE_SQUARES
-        .iter()
-        .position(|&candidate| candidate == square)
+fn is_in_bottom_left_quadrant(square: Square) -> bool {
+    let idx = u32::from(square) as i8;
+    let file = idx % 8;
+    let rank = idx / 8;
+    file <= 3 && rank <= 3
 }
 
-#[derive(Clone, Copy)]
-enum Transform {
-    Identity,
-    FlipHorizontal,
-    FlipVertical,
-    Rotate90,
-    Rotate180,
-    Rotate270,
-    MirrorMain,
-    MirrorAnti,
+fn is_in_bottom_half(square: Square) -> bool {
+    let rank = (u32::from(square) / 8) as i8;
+    rank <= 3
 }
 
-const CANONICAL_TRANSFORMS: [Transform; 8] = [
-    Transform::Identity,
-    Transform::FlipHorizontal,
-    Transform::FlipVertical,
-    Transform::Rotate90,
-    Transform::Rotate270,
-    Transform::Rotate180,
-    Transform::MirrorMain,
-    Transform::MirrorAnti,
-];
+fn strong_king_allowed_square(key: &MaterialKey, square: Square) -> bool {
+    match (key.has_pawns(), key.has_bishops()) {
+        (false, false) => is_in_wedge(square),
+        (false, true) => is_in_bottom_left_quadrant(square),
+        (true, false) => is_in_bottom_left_quadrant(square),
+        (true, true) => is_in_bottom_half(square),
+    }
+}
 
 fn transform_square(square: Square, transform: Transform) -> Square {
     let idx = u32::from(square) as i8;
@@ -167,13 +147,13 @@ fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
     };
 
     let mut fallback = None;
-    for transform in CANONICAL_TRANSFORMS.iter() {
-        let transformed_king = transform_square(king_square, *transform);
-        let transformed = apply_transform(position, *transform);
+    for &transform in key.allowed_transforms().iter() {
+        let transformed_king = transform_square(king_square, transform);
+        let transformed = apply_transform(position, transform);
         if count_board_pieces(&transformed) != key.counts {
             continue;
         }
-        if wedge_index(transformed_king).is_some() {
+        if strong_king_allowed_square(key, transformed_king) {
             return transformed;
         }
         if fallback.is_none() {
@@ -190,13 +170,9 @@ fn restrict_allowed_squares(
     group: &PieceGroup,
     key: &MaterialKey,
 ) {
-    if key.has_pawns() {
-        return;
-    }
-
     let strong = key.strong_color();
     if group.piece.role == shakmaty::Role::King && group.piece.color == strong {
-        allowed.retain(|&idx| is_in_wedge(squares[idx]));
+        allowed.retain(|&idx| strong_king_allowed_square(key, squares[idx]));
     }
 }
 

@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use crate::transform::{ALL_TRANSFORMS, AXIS_FLIPS, HALF_TURN_ONLY, ROTATION_ONLY, Transform};
 use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
 
 /// Represents a material configuration, e.g. `KQvK`.
@@ -197,14 +198,7 @@ impl MaterialKey {
             return false;
         }
 
-        let light_idx = PieceDescriptor::LightBishop as usize;
-        let dark_idx = PieceDescriptor::DarkBishop as usize;
-
-        let total_bishops: u16 = (self.counts[0][light_idx] as u16)
-            + (self.counts[0][dark_idx] as u16)
-            + (self.counts[1][light_idx] as u16)
-            + (self.counts[1][dark_idx] as u16);
-        if total_bishops == 0 {
+        if !self.has_bishops() {
             return false;
         }
 
@@ -251,6 +245,15 @@ impl MaterialKey {
         self.counts[0][pawn_idx] > 0 || self.counts[1][pawn_idx] > 0
     }
 
+    pub(crate) fn has_bishops(&self) -> bool {
+        let light_idx = PieceDescriptor::LightBishop as usize;
+        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        self.counts[0][light_idx] > 0
+            || self.counts[1][light_idx] > 0
+            || self.counts[0][dark_idx] > 0
+            || self.counts[1][dark_idx] > 0
+    }
+
     pub(crate) fn strong_color(&self) -> Color {
         let order = [
             PieceDescriptor::Queen as usize,
@@ -272,6 +275,15 @@ impl MaterialKey {
         }
 
         Color::White
+    }
+
+    pub(crate) fn allowed_transforms(&self) -> &'static [Transform] {
+        match (!self.has_pawns(), self.has_bishops()) {
+            (true, false) => ALL_TRANSFORMS,
+            (true, true) => ROTATION_ONLY,
+            (false, false) => AXIS_FLIPS,
+            (false, true) => HALF_TURN_ONLY,
+        }
     }
 
     pub(crate) fn child_material_keys(&self) -> Vec<MaterialKey> {
@@ -483,5 +495,56 @@ mod tests {
     fn material_key_flips_bishop_colors_2() {
         let key = MaterialKey::from_string("KBlBlBdvK").unwrap();
         assert_eq!(key.to_string(), "KBdBdBlvK");
+    }
+
+    #[test]
+    fn allowed_transforms_pawnless_no_bishops() {
+        use crate::transform::Transform::*;
+
+        let key = MaterialKey::from_string("KQvK").unwrap();
+        assert_eq!(
+            key.allowed_transforms(),
+            [
+                Identity,
+                FlipHorizontal,
+                FlipVertical,
+                Rotate90,
+                Rotate270,
+                Rotate180,
+                MirrorMain,
+                MirrorAnti
+            ]
+            .as_slice()
+        );
+    }
+
+    #[test]
+    fn allowed_transforms_pawnless_with_bishops() {
+        use crate::transform::Transform::*;
+
+        let key = MaterialKey::from_string("KBdvK").unwrap();
+        assert_eq!(
+            key.allowed_transforms(),
+            [Identity, Rotate90, Rotate180, Rotate270].as_slice()
+        );
+    }
+
+    #[test]
+    fn allowed_transforms_with_pawns_no_bishops() {
+        use crate::transform::Transform::*;
+
+        let key = MaterialKey::from_string("KPvK").unwrap();
+        assert_eq!(
+            key.allowed_transforms(),
+            [Identity, FlipHorizontal, FlipVertical, Rotate180].as_slice()
+        );
+    }
+
+    #[test]
+    fn allowed_transforms_with_pawns_and_bishops() {
+        use crate::transform::Transform::*;
+
+        let key = MaterialKey::from_string("KBdvKP").unwrap();
+        assert_eq!(key.allowed_transforms(), [Identity, Rotate180].as_slice());
     }
 }
