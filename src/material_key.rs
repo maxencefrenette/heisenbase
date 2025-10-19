@@ -281,8 +281,8 @@ impl MaterialKey {
         match (!self.has_pawns(), self.has_bishops()) {
             (true, false) => TransformSet::Full,
             (true, true) => TransformSet::Rotations,
-            (false, false) => TransformSet::AxisFlips,
-            (false, true) => TransformSet::HalfTurn,
+            (false, false) => TransformSet::Horizontal,
+            (false, true) => TransformSet::Identity,
         }
     }
 
@@ -540,7 +540,7 @@ mod tests {
         let key = MaterialKey::from_string("KPvK").unwrap();
         assert_eq!(
             key.allowed_transforms(),
-            [Identity, FlipHorizontal, FlipVertical, Rotate180].as_slice()
+            [Identity, FlipHorizontal].as_slice()
         );
     }
 
@@ -549,7 +549,7 @@ mod tests {
         use crate::transform::Transform::*;
 
         let key = MaterialKey::from_string("KBdvKP").unwrap();
-        assert_eq!(key.allowed_transforms(), [Identity, Rotate180].as_slice());
+        assert_eq!(key.allowed_transforms(), [Identity].as_slice());
     }
 
     #[test]
@@ -573,7 +573,7 @@ mod tests {
         use crate::transform::TransformSet;
 
         let key = MaterialKey::from_string("KPvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::AxisFlips);
+        assert_eq!(key.transform_set(), TransformSet::Horizontal);
     }
 
     #[test]
@@ -581,6 +581,6 @@ mod tests {
         use crate::transform::TransformSet;
 
         let key = MaterialKey::from_string("KBdvKP").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::HalfTurn);
+        assert_eq!(key.transform_set(), TransformSet::Identity);
     }
 }

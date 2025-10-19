@@ -62,13 +62,13 @@ Case 2: 4 rotations allowed (pawnless positions, bishops)
 
 The strong side king is placed in the bottom-left quadrant of the board (16 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
 
-Case 3: Rotation by 180°, horizontal and vertical flips allowed (pawned positions, no bishops)
+Case 3: Only horizontal flips allowed (pawnful positions, no bishops)
 
-The strong side king is placed in the bottom-left quadrant of the board (16 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
+The strong side king is placed in the left half of the board (32 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
 
-Case 4: Only rotation by 180° allowed (pawned positions, bishops)
+Case 4: No transformations allowed (pawnful positions, bishops)
 
-The strong side king is placed in the bottom half of the board (32 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
+The strong side king is placed anywhere on the board. The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
 
 ### Other pieces canonicalization
 

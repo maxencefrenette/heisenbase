@@ -52,16 +52,17 @@ fn is_in_bottom_left_quadrant(square: Square) -> bool {
     file <= 3 && rank <= 3
 }
 
-fn is_in_bottom_half(square: Square) -> bool {
-    let rank = (u32::from(square) / 8) as i8;
-    rank <= 3
+fn is_in_left_half(square: Square) -> bool {
+    let file = (u32::from(square) as i8) % 8;
+    file <= 3
 }
 
 fn strong_king_allowed_square(key: &MaterialKey, square: Square) -> bool {
     match key.transform_set() {
         TransformSet::Full => is_in_wedge(square),
-        TransformSet::Rotations | TransformSet::AxisFlips => is_in_bottom_left_quadrant(square),
-        TransformSet::HalfTurn => is_in_bottom_half(square),
+        TransformSet::Rotations => is_in_bottom_left_quadrant(square),
+        TransformSet::Horizontal => is_in_left_half(square),
+        TransformSet::Identity => true,
     }
 }
 
@@ -125,10 +126,6 @@ fn count_board_pieces(position: &Chess) -> [[u8; PIECES.len()]; 2] {
 }
 
 fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
-    if key.has_pawns() {
-        return position.clone();
-    }
-
     let strong = key.strong_color();
     let mut king_square = None;
     for square in Square::ALL {
@@ -468,6 +465,57 @@ mod tests {
     fn roundtrip_knnvk() {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
         roundtrip_random_indices(mk, 5);
+    }
+
+    #[test]
+    fn horizontal_flip_canonicalizes_kpvk() {
+        use crate::transform::Transform;
+        use shakmaty::{CastlingMode, Chess, Color, Piece, Role, Setup, Square};
+
+        let mk = MaterialKey::from_string("KPvK").unwrap();
+
+        let mut setup = Setup::empty();
+        setup.board.set_piece_at(
+            Square::H1,
+            Piece {
+                role: Role::King,
+                color: Color::White,
+            },
+        );
+        setup.board.set_piece_at(
+            Square::F2,
+            Piece {
+                role: Role::Pawn,
+                color: Color::White,
+            },
+        );
+        setup.board.set_piece_at(
+            Square::H8,
+            Piece {
+                role: Role::King,
+                color: Color::Black,
+            },
+        );
+        setup.turn = Color::White;
+
+        let position = Chess::from_setup(setup, CastlingMode::Standard).unwrap();
+        let transformed = apply_transform(&position, Transform::FlipHorizontal);
+
+        let index = position_to_index(&mk, &position).unwrap();
+        let transformed_index = position_to_index(&mk, &transformed).unwrap();
+        assert_eq!(index, transformed_index);
+
+        let canonical = canonicalize_position(&mk, &position);
+        let strong_square = canonical
+            .board()
+            .by_piece(Piece {
+                role: Role::King,
+                color: Color::White,
+            })
+            .into_iter()
+            .next()
+            .expect("white king present");
+        assert!(is_in_left_half(strong_square));
     }
 
     #[test]
