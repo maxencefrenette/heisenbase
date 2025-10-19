@@ -28,6 +28,176 @@ fn piece_groups(key: &MaterialKey) -> Vec<PieceGroup> {
     groups
 }
 
+const WEDGE_SQUARES: [Square; 10] = [
+    Square::B1,
+    Square::C1,
+    Square::D1,
+    Square::C2,
+    Square::D2,
+    Square::D3,
+    Square::A1,
+    Square::B2,
+    Square::C3,
+    Square::D4,
+];
+
+fn is_in_wedge(square: Square) -> bool {
+    matches!(
+        square,
+        Square::A1
+            | Square::B1
+            | Square::C1
+            | Square::D1
+            | Square::B2
+            | Square::C2
+            | Square::D2
+            | Square::D3
+            | Square::C3
+            | Square::D4
+    )
+}
+
+fn wedge_index(square: Square) -> Option<usize> {
+    WEDGE_SQUARES
+        .iter()
+        .position(|&candidate| candidate == square)
+}
+
+fn material_has_pawns(key: &MaterialKey) -> bool {
+    let pawn_idx = crate::material_key::PieceDescriptor::Pawn as usize;
+    key.counts[0][pawn_idx] > 0 || key.counts[1][pawn_idx] > 0
+}
+
+fn strong_color(key: &MaterialKey) -> Color {
+    let order = [
+        crate::material_key::PieceDescriptor::Queen as usize,
+        crate::material_key::PieceDescriptor::Rook as usize,
+        crate::material_key::PieceDescriptor::LightBishop as usize,
+        crate::material_key::PieceDescriptor::DarkBishop as usize,
+        crate::material_key::PieceDescriptor::Knight as usize,
+        crate::material_key::PieceDescriptor::Pawn as usize,
+    ];
+
+    for &idx in &order {
+        let white = key.counts[0][idx];
+        let black = key.counts[1][idx];
+        if white > black {
+            return Color::White;
+        } else if black > white {
+            return Color::Black;
+        }
+    }
+
+    Color::White
+}
+
+#[derive(Clone, Copy)]
+enum Transform {
+    Identity,
+    FlipHorizontal,
+    FlipVertical,
+    Rotate90,
+    Rotate180,
+    Rotate270,
+    MirrorMain,
+    MirrorAnti,
+}
+
+const CANONICAL_TRANSFORMS: [Transform; 8] = [
+    Transform::Identity,
+    Transform::FlipHorizontal,
+    Transform::FlipVertical,
+    Transform::Rotate90,
+    Transform::Rotate270,
+    Transform::Rotate180,
+    Transform::MirrorMain,
+    Transform::MirrorAnti,
+];
+
+fn transform_square(square: Square, transform: Transform) -> Square {
+    let idx = u32::from(square) as i8;
+    let file = idx % 8;
+    let rank = idx / 8;
+
+    let (new_file, new_rank) = match transform {
+        Transform::Identity => (file, rank),
+        Transform::FlipHorizontal => (7 - file, rank),
+        Transform::FlipVertical => (file, 7 - rank),
+        Transform::Rotate90 => (rank, 7 - file),
+        Transform::Rotate180 => (7 - file, 7 - rank),
+        Transform::Rotate270 => (7 - rank, file),
+        Transform::MirrorMain => (rank, file),
+        Transform::MirrorAnti => (7 - rank, 7 - file),
+    };
+
+    Square::new((new_rank * 8 + new_file) as u32)
+}
+
+fn apply_transform(position: &Chess, transform: Transform) -> Chess {
+    if matches!(transform, Transform::Identity) {
+        return position.clone();
+    }
+
+    let mut setup = Setup::empty();
+    for square in Square::ALL {
+        if let Some(piece) = position.board().piece_at(square) {
+            let target = transform_square(square, transform);
+            setup.board.set_piece_at(target, piece);
+        }
+    }
+    setup.turn = position.turn();
+
+    Chess::from_setup(setup, CastlingMode::Standard)
+        .expect("transforming a valid position should remain valid")
+}
+
+fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
+    if material_has_pawns(key) {
+        return position.clone();
+    }
+
+    let strong = strong_color(key);
+    let mut king_square = None;
+    for square in Square::ALL {
+        if let Some(piece) = position.board().piece_at(square) {
+            if piece.role == shakmaty::Role::King && piece.color == strong {
+                king_square = Some(square);
+                break;
+            }
+        }
+    }
+
+    let king_square = match king_square {
+        Some(sq) => sq,
+        None => return position.clone(),
+    };
+
+    for transform in CANONICAL_TRANSFORMS.iter() {
+        let transformed_king = transform_square(king_square, *transform);
+        if wedge_index(transformed_king).is_some() {
+            return apply_transform(position, *transform);
+        }
+    }
+
+    position.clone()
+}
+
+fn restrict_allowed_squares(
+    allowed: &mut Vec<usize>,
+    squares: &[Square],
+    group: &PieceGroup,
+    key: &MaterialKey,
+) {
+    if material_has_pawns(key) {
+        return;
+    }
+
+    let strong = strong_color(key);
+    if group.piece.role == shakmaty::Role::King && group.piece.color == strong {
+        allowed.retain(|&idx| is_in_wedge(squares[idx]));
+    }
+}
+
 /// Total number of mappable positions for a material configuration.
 ///
 /// Each index corresponds to a unique permutation where all pieces appear
@@ -37,7 +207,7 @@ pub fn total_positions(key: &MaterialKey) -> usize {
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
     let mut total = 1usize;
     for group in piece_groups(key) {
-        let allowed: Vec<usize> = squares
+        let mut allowed: Vec<usize> = squares
             .iter()
             .enumerate()
             .filter(|&(_, sq)| match group.light {
@@ -47,6 +217,7 @@ pub fn total_positions(key: &MaterialKey) -> usize {
             })
             .map(|(i, _)| i)
             .collect();
+        restrict_allowed_squares(&mut allowed, &squares, &group, key);
         let base = n_choose_k(allowed.len(), group.count as usize);
         total *= base;
         for idx in allowed.iter().take(group.count as usize).rev() {
@@ -87,7 +258,7 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
     for group in piece_groups(key) {
-        let allowed: Vec<usize> = squares
+        let mut allowed: Vec<usize> = squares
             .iter()
             .enumerate()
             .filter(|&(_, sq)| match group.light {
@@ -97,6 +268,7 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
             })
             .map(|(i, _)| i)
             .collect();
+        restrict_allowed_squares(&mut allowed, &squares, &group, key);
         let base = n_choose_k(allowed.len(), group.count as usize);
         let group_index = pos_index % base;
         pos_index /= base;
@@ -122,6 +294,8 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
 /// appearing on a distinct square. Positions with mismatched material are
 /// outside the mapping and return an error.
 pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, MaterialError> {
+    let canonical = canonicalize_position(key, position);
+
     let mut board_counts = [[0u8; PIECES.len()]; 2];
     for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
         for (i, pd) in PIECES.iter().enumerate() {
@@ -134,7 +308,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
                 role: pd.role(),
                 color,
             };
-            let count = (position.board().by_piece(piece) & mask)
+            let count = (canonical.board().by_piece(piece) & mask)
                 .into_iter()
                 .count() as u8;
             board_counts[color_idx][i] = count;
@@ -150,7 +324,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
 
     for group in groups {
-        let allowed: Vec<usize> = squares
+        let mut allowed: Vec<usize> = squares
             .iter()
             .enumerate()
             .filter(|&(_, sq)| match group.light {
@@ -160,6 +334,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
             })
             .map(|(i, _)| i)
             .collect();
+        restrict_allowed_squares(&mut allowed, &squares, &group, key);
         let base = n_choose_k(allowed.len(), group.count as usize);
 
         let mut piece_indices: Vec<usize> = {
@@ -168,7 +343,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
                 Some(false) => Bitboard::DARK_SQUARES,
                 None => Bitboard::FULL,
             };
-            let bb = position.board().by_piece(group.piece) & mask;
+            let bb = canonical.board().by_piece(group.piece) & mask;
             let mut v = Vec::with_capacity(group.count as usize);
             for sq in bb {
                 let idx = allowed
@@ -190,7 +365,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
         multiplier *= base;
     }
 
-    let turn_index = match position.turn() {
+    let turn_index = match canonical.turn() {
         Color::White => 0usize,
         Color::Black => 1usize,
     };
@@ -260,13 +435,13 @@ mod tests {
     #[test]
     fn total_positions_without_overlap() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(total_positions(&mk), 64 * 63 * 62 * 2);
+        assert_eq!(total_positions(&mk), 10 * 63 * 62 * 2);
     }
 
     #[test]
     fn total_positions_with_duplicates() {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
-        assert_eq!(total_positions(&mk), 64 * (63 * 62 / 2) * 61 * 2);
+        assert_eq!(total_positions(&mk), 10 * (63 * 62 / 2) * 61 * 2);
     }
 
     #[test]
@@ -279,6 +454,36 @@ mod tests {
     fn roundtrip_kqvk() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
         roundtrip_random_indices(mk, 1);
+    }
+
+    #[test]
+    fn symmetric_positions_share_index() {
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        let mut base_pos = None;
+        for idx in 0..total_positions(&mk) {
+            if let Ok(pos) = index_to_position(&mk, idx) {
+                base_pos = Some((idx, pos));
+                break;
+            }
+        }
+        let (idx, canonical) = base_pos.expect("expected at least one valid position");
+        let transformed = apply_transform(&canonical, Transform::FlipHorizontal);
+        let transformed_idx = position_to_index(&mk, &transformed).unwrap();
+        assert_eq!(idx, transformed_idx);
+    }
+
+    #[test]
+    fn canonicalizes_table_builder_positions() {
+        use shakmaty::{CastlingMode, fen::Fen};
+
+        let mk = MaterialKey::from_string("KQvK").unwrap();
+        let fen = "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1";
+        let position = fen
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        assert!(position_to_index(&mk, &position).is_ok());
     }
 
     #[test]
@@ -370,18 +575,24 @@ mod tests {
         setup.turn = Color::White;
         let white_pos = Chess::from_setup(setup.clone(), CastlingMode::Standard).unwrap();
         let white_index = position_to_index(&mk, &white_pos).unwrap();
+        let canonical_white = canonicalize_position(&mk, &white_pos);
 
         setup.turn = Color::Black;
         let black_pos = Chess::from_setup(setup, CastlingMode::Standard).unwrap();
         let black_index = position_to_index(&mk, &black_pos).unwrap();
+        let canonical_black = canonicalize_position(&mk, &black_pos);
 
         assert_eq!(black_index, white_index + 1);
         assert_eq!(white_index % 2, 0);
         assert_eq!(black_index % 2, 1);
 
         let reconstructed = index_to_position(&mk, white_index + 1).unwrap();
-        assert_eq!(reconstructed.board(), white_pos.board());
+        assert_eq!(reconstructed.board(), canonical_black.board());
         assert_eq!(reconstructed.turn(), Color::Black);
+
+        let reconstructed_white = index_to_position(&mk, white_index).unwrap();
+        assert_eq!(reconstructed_white.board(), canonical_white.board());
+        assert_eq!(reconstructed_white.turn(), Color::White);
     }
 
     #[test]
