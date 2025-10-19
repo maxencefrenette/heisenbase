@@ -1,5 +1,5 @@
 use crate::material_key::{MaterialError, MaterialKey, PIECES};
-use crate::transform::Transform;
+use crate::transform::{Transform, TransformSet};
 use shakmaty::{Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, Setup, Square};
 
 #[derive(Clone, Copy)]
@@ -58,11 +58,10 @@ fn is_in_bottom_half(square: Square) -> bool {
 }
 
 fn strong_king_allowed_square(key: &MaterialKey, square: Square) -> bool {
-    match (key.has_pawns(), key.has_bishops()) {
-        (false, false) => is_in_wedge(square),
-        (false, true) => is_in_bottom_left_quadrant(square),
-        (true, false) => is_in_bottom_left_quadrant(square),
-        (true, true) => is_in_bottom_half(square),
+    match key.transform_set() {
+        TransformSet::Full => is_in_wedge(square),
+        TransformSet::Rotations | TransformSet::AxisFlips => is_in_bottom_left_quadrant(square),
+        TransformSet::HalfTurn => is_in_bottom_half(square),
     }
 }
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::transform::{ALL_TRANSFORMS, AXIS_FLIPS, HALF_TURN_ONLY, ROTATION_ONLY, Transform};
+use crate::transform::{Transform, TransformSet};
 use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
 
 /// Represents a material configuration, e.g. `KQvK`.
@@ -277,13 +277,17 @@ impl MaterialKey {
         Color::White
     }
 
-    pub(crate) fn allowed_transforms(&self) -> &'static [Transform] {
+    pub(crate) fn transform_set(&self) -> TransformSet {
         match (!self.has_pawns(), self.has_bishops()) {
-            (true, false) => ALL_TRANSFORMS,
-            (true, true) => ROTATION_ONLY,
-            (false, false) => AXIS_FLIPS,
-            (false, true) => HALF_TURN_ONLY,
+            (true, false) => TransformSet::Full,
+            (true, true) => TransformSet::Rotations,
+            (false, false) => TransformSet::AxisFlips,
+            (false, true) => TransformSet::HalfTurn,
         }
+    }
+
+    pub(crate) fn allowed_transforms(&self) -> &'static [Transform] {
+        self.transform_set().transforms()
     }
 
     pub(crate) fn child_material_keys(&self) -> Vec<MaterialKey> {
@@ -546,5 +550,37 @@ mod tests {
 
         let key = MaterialKey::from_string("KBdvKP").unwrap();
         assert_eq!(key.allowed_transforms(), [Identity, Rotate180].as_slice());
+    }
+
+    #[test]
+    fn transform_set_matches_pawnless_no_bishops() {
+        use crate::transform::TransformSet;
+
+        let key = MaterialKey::from_string("KQvK").unwrap();
+        assert_eq!(key.transform_set(), TransformSet::Full);
+    }
+
+    #[test]
+    fn transform_set_matches_pawnless_with_bishops() {
+        use crate::transform::TransformSet;
+
+        let key = MaterialKey::from_string("KBdvK").unwrap();
+        assert_eq!(key.transform_set(), TransformSet::Rotations);
+    }
+
+    #[test]
+    fn transform_set_matches_with_pawns_no_bishops() {
+        use crate::transform::TransformSet;
+
+        let key = MaterialKey::from_string("KPvK").unwrap();
+        assert_eq!(key.transform_set(), TransformSet::AxisFlips);
+    }
+
+    #[test]
+    fn transform_set_matches_with_pawns_and_bishops() {
+        use crate::transform::TransformSet;
+
+        let key = MaterialKey::from_string("KBdvKP").unwrap();
+        assert_eq!(key.transform_set(), TransformSet::HalfTurn);
     }
 }

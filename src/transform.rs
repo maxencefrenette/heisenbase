@@ -36,3 +36,22 @@ pub const AXIS_FLIPS: &[Transform] = &[
 ];
 
 pub const HALF_TURN_ONLY: &[Transform] = &[Transform::Identity, Transform::Rotate180];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransformSet {
+    Full,
+    Rotations,
+    AxisFlips,
+    HalfTurn,
+}
+
+impl TransformSet {
+    pub fn transforms(self) -> &'static [Transform] {
+        match self {
+            TransformSet::Full => ALL_TRANSFORMS,
+            TransformSet::Rotations => ROTATION_ONLY,
+            TransformSet::AxisFlips => AXIS_FLIPS,
+            TransformSet::HalfTurn => HALF_TURN_ONLY,
+        }
+    }
+}
