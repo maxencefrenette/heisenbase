@@ -35,7 +35,7 @@ impl PieceDescriptor {
             PieceDescriptor::King => Role::King,
             PieceDescriptor::Queen => Role::Queen,
             PieceDescriptor::Rook => Role::Rook,
-            PieceDescriptor::LightBishop | PieceDescriptor::DarkBishop => Role::Bishop,
+            PieceDescriptor::DarkBishop | PieceDescriptor::LightBishop => Role::Bishop,
             PieceDescriptor::Knight => Role::Knight,
             PieceDescriptor::Pawn => Role::Pawn,
         }
@@ -491,8 +491,13 @@ mod tests {
     }
 
     #[test]
-    fn canonicalizes_bishop_colors_in_material_key() {
+    fn canonicalizes_bishop_colors_in_material_key_1() {
         assert_eq!(material_key("KBlvKBd"), "KBdvKBl");
+    }
+
+    #[test]
+    fn canonicalizes_bishop_colors_in_material_key_2() {
+        assert_eq!(material_key("KBlBlBdvK"), "KBdBdBlvK");
     }
 
     #[test]
@@ -529,18 +534,6 @@ mod tests {
             .unwrap();
         let key = MaterialKey::from_position(&position).unwrap();
         assert_eq!(key.to_string(), "KPvK");
-    }
-
-    #[test]
-    fn material_key_flips_bishop_colors_1() {
-        let key = MaterialKey::from_string("KBlvKBd").unwrap();
-        assert_eq!(key.to_string(), "KBdvKBl");
-    }
-
-    #[test]
-    fn material_key_flips_bishop_colors_2() {
-        let key = MaterialKey::from_string("KBlBlBdvK").unwrap();
-        assert_eq!(key.to_string(), "KBdBdBlvK");
     }
 
     #[test]
