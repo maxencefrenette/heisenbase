@@ -23,8 +23,8 @@ impl PieceDescriptor {
             PieceDescriptor::King => "K",
             PieceDescriptor::Queen => "Q",
             PieceDescriptor::Rook => "R",
-            PieceDescriptor::LightBishop => "Bl",
             PieceDescriptor::DarkBishop => "Bd",
+            PieceDescriptor::LightBishop => "Bl",
             PieceDescriptor::Knight => "N",
             PieceDescriptor::Pawn => "P",
         }
@@ -54,8 +54,8 @@ impl PieceDescriptor {
             "K" => Some(PieceDescriptor::King),
             "Q" => Some(PieceDescriptor::Queen),
             "R" => Some(PieceDescriptor::Rook),
-            "Bl" => Some(PieceDescriptor::LightBishop),
             "Bd" => Some(PieceDescriptor::DarkBishop),
+            "Bl" => Some(PieceDescriptor::LightBishop),
             "N" => Some(PieceDescriptor::Knight),
             "P" => Some(PieceDescriptor::Pawn),
             _ => None,
@@ -67,8 +67,8 @@ pub(crate) const PIECES: [PieceDescriptor; 7] = [
     PieceDescriptor::King,
     PieceDescriptor::Queen,
     PieceDescriptor::Rook,
-    PieceDescriptor::LightBishop,
     PieceDescriptor::DarkBishop,
+    PieceDescriptor::LightBishop,
     PieceDescriptor::Knight,
     PieceDescriptor::Pawn,
 ];
@@ -76,6 +76,8 @@ pub(crate) const PIECES: [PieceDescriptor; 7] = [
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaterialKey {
     /// Piece counts indexed by color then piece descriptor.
+    /// By convention the strong side is always first and it is encoded as white
+    /// whenever we convert to a position.
     pub(crate) counts: [[u8; PIECES.len()]; 2],
 }
 
@@ -188,10 +190,15 @@ impl MaterialKey {
     }
 
     fn canonicalize(&mut self) {
+        // Ensure that the stronger side is white.
+        if Self::strong_color_from_counts(&self.counts) == Color::Black {
+            self.swap_colors();
+        }
+
+        // Canonicalize bishop colors if needed.
         if self.should_swap_bishops() {
             self.flip_bishop_colors();
         }
-        self.ensure_strong_white();
     }
 
     fn should_swap_bishops(&self) -> bool {
@@ -255,16 +262,17 @@ impl MaterialKey {
             || self.counts[1][dark_idx] > 0
     }
 
-    fn ensure_strong_white(&mut self) {
-        if Self::strong_color_from_counts(&self.counts).is_black() {
-            self.swap_colors();
-        }
-    }
-
     fn swap_colors(&mut self) {
         self.counts.swap(0, 1);
     }
 
+    /// Determines which color has the stronger material based on piece counts.
+    ///
+    /// By design, this matches the logic used by syzygy tablebases.
+    ///
+    /// The first factor is the total piece count.
+    /// Then, it's which side has the strongest piece.
+    /// Finally, In case of a tie, White is considered stronger.
     fn strong_color_from_counts(counts: &[[u8; PIECES.len()]; 2]) -> Color {
         let compare = |white: u8, black: u8| -> Option<Color> {
             if white > black {
@@ -410,20 +418,11 @@ impl MaterialKey {
 impl fmt::Display for MaterialKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn write_bishops(f: &mut fmt::Formatter<'_>, light: u8, dark: u8) -> fmt::Result {
-            if light < dark {
-                for _ in 0..dark {
-                    write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
-                }
-                for _ in 0..light {
-                    write!(f, "{}", PieceDescriptor::LightBishop.token())?;
-                }
-            } else {
-                for _ in 0..light {
-                    write!(f, "{}", PieceDescriptor::LightBishop.token())?;
-                }
-                for _ in 0..dark {
-                    write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
-                }
+            for _ in 0..dark {
+                write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
+            }
+            for _ in 0..light {
+                write!(f, "{}", PieceDescriptor::LightBishop.token())?;
             }
             Ok(())
         }
@@ -436,22 +435,34 @@ impl fmt::Display for MaterialKey {
                 write!(f, "v")?;
             }
 
-            for (i, pd) in PIECES.iter().enumerate() {
-                if i == light_idx {
-                    let light = self.counts[color_idx][light_idx];
-                    let dark = self.counts[color_idx][dark_idx];
-                    if light == 0 && dark == 0 {
-                        continue;
-                    }
-                    write_bishops(f, light, dark)?;
-                    continue;
-                } else if i == dark_idx {
-                    continue;
-                }
+            // Manually emit pieces in canonical order to keep output stable.
+            let counts = &self.counts[color_idx];
 
-                for _ in 0..self.counts[color_idx][i] {
-                    write!(f, "{}", pd.token())?;
-                }
+            // Always write the king first.
+            for _ in 0..counts[PieceDescriptor::King as usize] {
+                write!(f, "{}", PieceDescriptor::King.token())?;
+            }
+
+            for _ in 0..counts[PieceDescriptor::Queen as usize] {
+                write!(f, "{}", PieceDescriptor::Queen.token())?;
+            }
+
+            for _ in 0..counts[PieceDescriptor::Rook as usize] {
+                write!(f, "{}", PieceDescriptor::Rook.token())?;
+            }
+
+            let light = counts[light_idx];
+            let dark = counts[dark_idx];
+            if light > 0 || dark > 0 {
+                write_bishops(f, light, dark)?;
+            }
+
+            for _ in 0..counts[PieceDescriptor::Knight as usize] {
+                write!(f, "{}", PieceDescriptor::Knight.token())?;
+            }
+
+            for _ in 0..counts[PieceDescriptor::Pawn as usize] {
+                write!(f, "{}", PieceDescriptor::Pawn.token())?;
             }
         }
 
@@ -465,22 +476,23 @@ mod tests {
     use shakmaty::{CastlingMode, fen::Fen};
     use std::collections::BTreeSet;
 
+    fn material_key(s: &str) -> String {
+        MaterialKey::from_string(s).unwrap().to_string()
+    }
+
     #[test]
     fn parses_kqvk() {
-        let mk = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(mk.to_string(), "KQvK");
+        assert_eq!(material_key("KQvK"), "KQvK");
     }
 
     #[test]
     fn parses_light_and_dark_bishops() {
-        let mk = MaterialKey::from_string("BlBdvK").unwrap();
-        assert_eq!(mk.to_string(), "BlBdvK");
+        assert_eq!(material_key("KBdBlvK"), "KBdBlvK");
     }
 
     #[test]
     fn canonicalizes_bishop_colors_in_material_key() {
-        let mk = MaterialKey::from_string("KBlvKBd").unwrap();
-        assert_eq!(mk.to_string(), "KBdvKBl");
+        assert_eq!(material_key("KBlvKBd"), "KBdvKBl");
     }
 
     #[test]

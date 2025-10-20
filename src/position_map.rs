@@ -25,7 +25,11 @@ fn piece_groups(key: &MaterialKey) -> Vec<PieceGroup> {
                         color,
                     },
                     count,
-                    light: pd.light(),
+                    light: if pd.role() == shakmaty::Role::Bishop {
+                        None
+                    } else {
+                        pd.light()
+                    },
                 });
             }
         }
@@ -208,15 +212,6 @@ fn arrangements_for_pair(key: &MaterialKey, strong: Square, weak: Square) -> usi
     total
 }
 
-fn arrangements_per_pair(key: &MaterialKey) -> usize {
-    let pairs = king_pairs(key);
-    let (strong, weak) = pairs
-        .into_iter()
-        .next()
-        .expect("at least one king pair must exist");
-    arrangements_for_pair(key, strong, weak)
-}
-
 fn apply_transform(position: &Chess, transform: Transform) -> Chess {
     if matches!(transform, Transform::Identity) {
         return position.clone();
@@ -346,9 +341,11 @@ fn restrict_allowed_squares(
 /// on distinct squares. Identical pieces are treated as indistinguishable,
 /// so their placements are counted combinatorially.
 pub fn total_positions(key: &MaterialKey) -> usize {
-    let pair_count = king_pairs(key).len();
-    let placements = arrangements_per_pair(key);
-    pair_count * placements * 2
+    let mut total = 0usize;
+    for (strong, weak) in king_pairs(key) {
+        total += arrangements_for_pair(key, strong, weak);
+    }
+    total * 2
 }
 
 /// Convert an index into a [`Chess`] position.
@@ -376,14 +373,26 @@ pub fn index_to_position(key: &MaterialKey, mut pos_index: usize) -> Result<Ches
     };
     pos_index /= 2;
 
-    let pairs = king_pairs(key);
-    let placements = arrangements_per_pair(key);
-    let pair_index = pos_index / placements;
-    let mut pair_offset = pos_index % placements;
-    let (strong_square, weak_square) = pairs
-        .get(pair_index)
-        .copied()
-        .expect("pair index should be within range");
+    let mut strong_square = None;
+    let mut weak_square = None;
+    let mut pair_offset = 0usize;
+    let mut remaining = pos_index;
+    for (strong, weak) in king_pairs(key) {
+        let placements = arrangements_for_pair(key, strong, weak);
+        if placements == 0 {
+            continue;
+        }
+        if remaining < placements {
+            strong_square = Some(strong);
+            weak_square = Some(weak);
+            pair_offset = remaining;
+            break;
+        }
+        remaining -= placements;
+    }
+
+    let strong_square = strong_square.expect("pair index should be within range");
+    let weak_square = weak_square.expect("pair index should be within range");
 
     let mut setup = Setup::empty();
     setup.turn = turn;
@@ -472,12 +481,25 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
     let strong_square = strong_square.expect("strong king must exist");
     let weak_square = weak_square.expect("weak king must exist");
 
-    let pairs = king_pairs(key);
-    let pair_index = pairs
-        .iter()
-        .position(|&(strong, weak)| strong == strong_square && weak == weak_square)
-        .ok_or_else(|| MaterialError::InvalidPosition(PositionErrorKinds::empty()))?;
-    let placements = arrangements_per_pair(key);
+    let mut base_index = 0usize;
+    let mut placements = 0usize;
+    let mut found_pair = false;
+    for (strong, weak) in king_pairs(key) {
+        let pair_placements = arrangements_for_pair(key, strong, weak);
+        if pair_placements == 0 {
+            continue;
+        }
+        if strong == strong_square && weak == weak_square {
+            placements = pair_placements;
+            found_pair = true;
+            break;
+        }
+        base_index += pair_placements;
+    }
+
+    if !found_pair {
+        return Err(MaterialError::InvalidPosition(PositionErrorKinds::empty()));
+    }
 
     let mut within_index = 0usize;
     let mut multiplier = 1usize;
@@ -532,7 +554,7 @@ pub fn position_to_index(key: &MaterialKey, position: &Chess) -> Result<usize, M
 
     debug_assert!(within_index < placements);
 
-    let index = pair_index * placements + within_index;
+    let index = base_index + within_index;
 
     let turn_index = match canonical.turn() {
         Color::White => 0usize,
@@ -604,17 +626,21 @@ mod tests {
     #[test]
     fn total_positions_without_overlap() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
-        let pair_count = king_pairs(&mk).len();
-        let placements = arrangements_per_pair(&mk);
-        assert_eq!(total_positions(&mk), pair_count * placements * 2);
+        let expected: usize = king_pairs(&mk)
+            .into_iter()
+            .map(|(strong, weak)| arrangements_for_pair(&mk, strong, weak))
+            .sum();
+        assert_eq!(total_positions(&mk), expected * 2);
     }
 
     #[test]
     fn total_positions_with_duplicates() {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
-        let pair_count = king_pairs(&mk).len();
-        let placements = arrangements_per_pair(&mk);
-        assert_eq!(total_positions(&mk), pair_count * placements * 2);
+        let expected: usize = king_pairs(&mk)
+            .into_iter()
+            .map(|(strong, weak)| arrangements_for_pair(&mk, strong, weak))
+            .sum();
+        assert_eq!(total_positions(&mk), expected * 2);
     }
 
     #[test]
@@ -854,7 +880,6 @@ mod tests {
 
         let mk = MaterialKey::from_string("KBlvKBd").unwrap();
         assert_eq!(mk.to_string(), "KBdvKBl");
-
         let position = "8/3kb3/8/8/2B5/8/8/4K3 w - - 0 1"
             .parse::<Fen>()
             .unwrap()
