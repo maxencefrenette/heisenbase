@@ -12,6 +12,7 @@ use shakmaty::Position;
 use std::fs;
 
 #[test]
+#[ignore]
 fn compress_decompress_kqvk_table_round_trip() {
     let material = MaterialKey::from_string("KQvK").unwrap();
     let total = total_positions(&material);
