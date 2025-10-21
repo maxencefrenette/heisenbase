@@ -134,3 +134,36 @@ pub fn read_wdl_file<P: AsRef<Path>>(path: P) -> io::Result<(MaterialKey, Compre
         },
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn read_wdl_file_rejects_bad_magic() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after UNIX_EPOCH")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("heisenbase_bad_magic_{unique}.hbt"));
+
+        {
+            let mut file = File::create(&path).expect("failed to create temporary file");
+            file.write_all(b"BAD!")
+                .expect("failed to write incorrect magic to temporary file");
+            file.write_all(&[0u8; 16])
+                .expect("failed to write placeholder data to temporary file");
+        }
+
+        let result = read_wdl_file(&path);
+        std::fs::remove_file(&path).expect("failed to remove temporary file");
+
+        assert!(matches!(
+            result,
+            Err(ref e) if e.kind() == io::ErrorKind::InvalidData
+        ));
+    }
+}
