@@ -1,0 +1,71 @@
+# Pawn Structure Material Key Migration
+
+## Background
+- Material keys currently encode only piece counts per color (`KQvK`, `KPvK`, …). Pawns are indistinguishable beyond their count, which prevents us from targeting a specific pawn structure.
+- Canonicalization swaps colors to put the stronger side first and flips bishop colors to minimize the lexicographic string, after which downstream components (position indexer, table builder, CLI) assume that material keys carry no square-level information.
+- Persisted assets (WDL files under `data/`, PGN indexes, CLI arguments, docs) all rely on the count-only key space.
+
+## Goal
+Make each pawn location explicit in the material key so that configurations such as a single pawn on `e7` are represented as `Ke7vK` rather than `KPvK`. Non-pawn pieces remain count-based.
+
+## Specification
+- **Data model**
+  - Extend `MaterialKey` with `pawn_squares: [Bitboard; 2]` (exact type tbd, but it must preserve deterministic ordering and cheap cloning).
+  - Maintain `counts` for compatibility with existing code paths; `counts[color][Pawn]` must equal `pawn_squares[color].len()`.
+  - Derive or implement `Eq`, `Ord`, and `Hash` so that equality and ordering consider both counts and pawn squares.
+- **Textual encoding**
+  - Each side’s segment stays ordered as `{K, Q, R, Bd, Bl, N}` followed by zero or more two-character algebraic squares (`a2`, `h7`, …) for pawns.
+  - Square tokens are lowercase file + digit rank; they are emitted in ascending `Square::to_index()` order to keep strings stable.
+  - Examples: `Ke7vK` (strong side king + pawn on e7), `KQb7c7vKRg2` (two pawns on b7 & c7, lone pawn on g2 for the weak side).
+  - Parser accepts the existing bishop digraphs, upper-case piece tokens, and lowercase square tokens; it rejects malformed squares or duplicate pawn squares.
+- **Canonicalization rules**
+  - Continue using material strength ordering to decide which color becomes “white” internally; when swapping colors, also swap the associated `pawn_squares`.
+  - Bishop colors cannot be flipped when pawns are present, as this would change the pawn structure.
+  - Introduce a new step after the existing canonicalization to normalize pawn orientation:
+    1. Determine the allowed transform set as today (`Full`, `Rotations`, `Horizontal`, `Identity`) based on the canonicalized counts.
+    2. For keys with pawns, apply each transform from the set to every stored pawn square plus all non-king piece groups implicitly defined by counts.
+    3. Select the transform that produces the lexicographically smallest serialization and persist the transformed pawn list plus the implicit choice for downstream consumers.
+    4. Cache the selected transform (or recompute on demand) so that position canonicalization can align positions with the new key.
+  - Sorting within `pawn_squares[color]` happens after the winning transform is applied.
+- **API changes**
+  - `MaterialKey::from_string` parses pawn square tokens alongside piece tokens and validates coordinate legality.
+  - `Display` implementation prints in the new format.
+  - `MaterialKey::from_position` gathers pawn squares directly during board scanning.
+  - `MaterialKey::child_material_keys` removes or relocates the precise pawn square that was captured or advanced (instead of just decrementing a count).
+  - Provide accessors (`pawn_squares(Color) -> &Bitboard`) to avoid leaking internal representation.
+- **Downstream components**
+  - `PositionIndexer` must use explicit pawn squares when enumerating placements, ensuring that pawns are pre-placed on fixed squares before distributing the remaining pieces.
+  - `TableBuilder` should treat pawn squares as fixed during move generation, captures, and promotions; when a pawn is removed, child keys inherit the parent’s remaining square list.
+  - `index_pgn` creates counts keyed by the full pawn-aware key; PGN traversal must canonicalize positions with the new logic so that transposed pawn structures map to the same key.
+  - `wdl_file` writer bumps the format version to `2` and persists the pawn-aware key. The reader supports both version `1` (legacy count-only keys) and `2` (new format) to smooth migration.
+  - CLI commands, docs, and examples should accept/read the extended syntax (e.g., `cargo run --release -- generate Ke7vK`).
+- **Validation**
+  - Update existing unit tests to cover parsing, formatting, canonicalization, and transform minimization with pawn coordinates.
+  - Add regression tests covering scenarios with mirrored pawn structures to ensure canonicalization chooses a unique orientation.
+
+## Implementation Plan
+1. **Introduce data structures**
+   - Add `pawn_squares` storage to `MaterialKey` plus helper routines for sorting, swapping, and transforming squares.
+   - Adjust derives (`PartialOrd`, `Ord`, `Hash`) to include pawn data.
+2. **Revise parsing and formatting**
+   - Extend `from_string` and `Display` to understand square tokens; backfill unit tests for round-tripping legacy and new examples.
+3. **Canonicalization update**
+   - Rework `canonicalize` to incorporate pawn transform minimization and ensure `has_pawns()` reads from the new storage.
+   - Document the chosen canonical transform so that `PositionIndexer` can consume it.
+4. **Downstream refactors**
+   - Update `PositionIndexer`, `TableBuilder`, and any logic iterating over pawns to use the fixed-square representation.
+   - Ensure `child_material_keys` manipulates the specific squares involved in captures/promotions.
+5. **File format & CLI**
+   - Bump WDL format version to `2`, update `docs/file_format.md`, and modify `wdl_file::{read, write}` plus CLI argument validation.
+   - Refresh documentation (`docs/canonicalization.md`, `docs/conventions.md`) and command examples.
+6. **Migration workflow**
+   - Regenerate PGN indexes and WDL tables under the new naming scheme.
+   - Provide a script or instructions to delete/rename legacy `*.hbt` files and rerun `cargo run --release -- generate …` as needed.
+7. **Testing**
+   - Update ignored integration test (`tests/wdl_file_roundtrip.rs`) and ensure `cargo test`, `cargo fmt`, and `cargo test -- --ignored` validations enforce the new semantics.
+
+## Open Questions
+- How should we encode en-passant availability in child keys when a pawn advances? (Probably unaffected, but confirm during implementation.)
+  - Answer: En-Passant should be ignored for now
+- Do we need an explicit compatibility layer for reading old keys from external data sets, or can we rely on regenerating everything locally?
+  - No need for any backward compatibility.
