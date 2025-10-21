@@ -81,7 +81,7 @@ fn main() {
                 println!("{:?}: {:.2}%", variant, percentage);
             }
             let compressed = compress_wdl(&wdl_table.positions);
-            let filename = format!("./data/{}.hbt", wdl_table.material);
+            let filename = format!("./data/heisenbase/{}.hbt", wdl_table.material);
             write_wdl_file(&filename, &wdl_table.material, &compressed)
                 .expect("failed to write table file");
             println!("Wrote table to {}", filename);

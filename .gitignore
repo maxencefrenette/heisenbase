@@ -20,8 +20,6 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Generated tablebase files
+# Data stored within the repo
 data/
-
-# Syzygy tablebases
-syzygy/
+.DS_Store

@@ -18,7 +18,7 @@ from typing import Iterable, Sequence
 
 # Configuration
 BASE_URL = "https://tablebase.lichess.ovh/tables/standard/3-4-5-wdl/"
-DEST_DIR = Path(__file__).resolve().parents[1] / "syzygy"
+DEST_DIR = Path(__file__).resolve().parents[1] / "data" / "syzygy"
 CHUNK_SIZE = 1 << 20  # 1 MiB chunks
 OVERWRITE = True
 DRY_RUN = False
