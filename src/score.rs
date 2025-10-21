@@ -213,3 +213,53 @@ impl From<WdlScoreRange> for DtzScoreRange {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{DtzScore, DtzScoreRange};
+    use crate::wdl_score_range::WdlScoreRange;
+
+    #[test]
+    fn wdl_and_dtz_range_round_trip() {
+        assert_round_trip(
+            WdlScoreRange::Unknown,
+            DtzScore::immediate_loss(),
+            DtzScore::immediate_win(),
+        );
+        assert_round_trip(
+            WdlScoreRange::WinOrDraw,
+            DtzScore::draw(),
+            DtzScore::immediate_win(),
+        );
+        assert_round_trip(
+            WdlScoreRange::DrawOrLoss,
+            DtzScore::immediate_loss(),
+            DtzScore::draw(),
+        );
+        assert_round_trip(
+            WdlScoreRange::Win,
+            DtzScore::immediate_win(),
+            DtzScore::immediate_win(),
+        );
+        assert_round_trip(WdlScoreRange::Draw, DtzScore::draw(), DtzScore::draw());
+        assert_round_trip(
+            WdlScoreRange::Loss,
+            DtzScore::immediate_loss(),
+            DtzScore::immediate_loss(),
+        );
+        assert_round_trip(
+            WdlScoreRange::IllegalPosition,
+            DtzScore::immediate_win(),
+            DtzScore::immediate_loss(),
+        );
+    }
+
+    fn assert_round_trip(wdl: WdlScoreRange, expected_min: DtzScore, expected_max: DtzScore) {
+        let dtz = DtzScoreRange::from(wdl);
+        assert_eq!(dtz.min, expected_min);
+        assert_eq!(dtz.max, expected_max);
+
+        let recovered: WdlScoreRange = dtz.into();
+        assert_eq!(recovered, wdl);
+    }
+}
