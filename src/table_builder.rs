@@ -4,6 +4,7 @@ use crate::position_map::PositionIndexer;
 use crate::score::DtzScoreRange;
 use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
+use indicatif::{ProgressBar, ProgressStyle};
 use shakmaty::{Chess, Move, Position};
 use std::collections::HashMap;
 use std::path::Path;
@@ -67,8 +68,13 @@ impl TableBuilder {
         const MAX_STEPS: usize = 101;
 
         for it in 0..MAX_STEPS {
-            let updates = self.step();
-            println!("Iteration {}: {} updates", it + 1, updates);
+            let progress = self.create_iteration_progress_bar(it + 1);
+            let updates = self.step_with_progress(&progress);
+            let message = format!("Iteration {}: {} updates", it + 1, updates);
+            progress.finish_with_message(message.clone());
+            if progress.is_hidden() {
+                println!("{message}");
+            }
             if updates == 0 {
                 break;
             }
@@ -78,13 +84,37 @@ impl TableBuilder {
         }
     }
 
+    fn create_iteration_progress_bar(&self, iteration: usize) -> ProgressBar {
+        let total_positions = self.positions.len() as u64;
+        let progress = ProgressBar::new(total_positions);
+        let style = ProgressStyle::with_template(
+            "{msg} {bar:40.cyan/blue} {pos}/{len} [{elapsed_precise}<{eta_precise}]",
+        )
+        .unwrap();
+        progress.set_style(style);
+        progress.set_message(format!("Iteration {iteration}"));
+        progress
+    }
+
     /// Perform one iteration of the table builder.
     ///
     /// This performs one bellman update on every position in the table and returns the number of
     /// positions that changed.
+    #[cfg(test)]
     fn step(&mut self) -> usize {
+        self.step_internal(None)
+    }
+
+    fn step_with_progress(&mut self, progress: &ProgressBar) -> usize {
+        self.step_internal(Some(progress))
+    }
+
+    fn step_internal(&mut self, progress: Option<&ProgressBar>) -> usize {
         let mut updates = 0;
         for pos_index in 0..self.positions.len() {
+            if let Some(pb) = progress {
+                pb.inc(1);
+            }
             let old_score = self.positions[pos_index];
 
             if old_score.is_illegal() {
@@ -137,6 +167,9 @@ impl TableBuilder {
                 self.positions[pos_index] = new_score;
                 updates += 1;
             }
+        }
+        if let Some(pb) = progress {
+            pb.set_position(self.positions.len() as u64);
         }
         updates
     }
