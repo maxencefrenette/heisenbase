@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 """
 Download all 3-man and 4-man Syzygy WDL tablebases from the Lichess mirror.
 
