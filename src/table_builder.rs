@@ -66,14 +66,14 @@ impl TableBuilder {
     pub fn solve(&mut self) {
         const MAX_STEPS: usize = 101;
 
-        for step in 0..MAX_STEPS {
+        for it in 0..MAX_STEPS {
             let updates = self.step();
-            println!("Step {}: {} updates", step + 1, updates);
+            println!("Iteration {}: {} updates", it + 1, updates);
             if updates == 0 {
                 break;
             }
-            if step == MAX_STEPS - 1 {
-                panic!("table build exceeded {} steps", MAX_STEPS);
+            if it == MAX_STEPS - 1 {
+                panic!("table build exceeded {} iterations", MAX_STEPS);
             }
         }
     }
