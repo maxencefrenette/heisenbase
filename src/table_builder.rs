@@ -18,7 +18,7 @@ pub struct TableBuilder {
 
 impl TableBuilder {
     pub fn new(material: MaterialKey) -> Self {
-        Self::with_data_dir(material, Path::new("./data"))
+        Self::with_data_dir(material, Path::new("./data/heisenbase"))
     }
 
     #[cfg(test)]

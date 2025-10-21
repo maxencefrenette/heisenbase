@@ -203,6 +203,13 @@ impl MaterialKey {
             .sum()
     }
 
+    pub fn total_piece_count(&self) -> u32 {
+        self.counts
+            .iter()
+            .map(|side| side.iter().map(|&count| count as u32).sum::<u32>())
+            .sum()
+    }
+
     fn canonicalize(&mut self) {
         // Ensure that the stronger side is white.
         if Self::strong_color_from_counts(&self.counts) == Color::Black {

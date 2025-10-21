@@ -24,7 +24,7 @@ const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
 const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
 const INVALID_FEN_POSITION_PREFIX: &str = "invalid FEN position:";
 const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
-const PARQUET_PATH: &str = "./data/pgn_index.parquet";
+pub const PARQUET_PATH: &str = "./data/pgn_index.parquet";
 
 pub fn run() -> io::Result<()> {
     let mut files = Vec::new();
