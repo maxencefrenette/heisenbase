@@ -439,7 +439,7 @@ impl PositionIndexer {
             if group.piece.role == shakmaty::Role::King {
                 continue;
             }
-            let mut allowed: Vec<usize> = squares
+            let allowed: Vec<usize> = squares
                 .iter()
                 .enumerate()
                 .filter(|&(_, sq)| match group.light {
@@ -449,7 +449,6 @@ impl PositionIndexer {
                 })
                 .map(|(i, _)| i)
                 .collect();
-            restrict_allowed_squares(&mut allowed, &squares, &group, &self.material_key);
             let base = n_choose_k(allowed.len(), group.count as usize);
             let group_index = pair_offset % base;
             pair_offset /= base;
