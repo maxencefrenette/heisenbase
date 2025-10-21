@@ -2,8 +2,7 @@
 """
 Download all 3-man and 4-man Syzygy WDL tablebases from the Lichess mirror.
 
-The script uses module-level constants for configuration to align with the
-project's execution flow (run with `uv run scripts/download_syzygy.py`).
+Run with `uv run scripts/download_syzygy.py`
 """
 from __future__ import annotations
 
