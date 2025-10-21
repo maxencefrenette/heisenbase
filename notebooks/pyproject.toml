@@ -1,0 +1,10 @@
+[project]
+name = "notebooks"
+version = "0.1.0"
+description = "Data exploration notebooks for Heisenbase"
+requires-python = ">=3.13"
+dependencies = [
+    "ipykernel>=7.0.1",
+    "pandas>=2.3.3",
+    "pyarrow>=21.0.0",
+]

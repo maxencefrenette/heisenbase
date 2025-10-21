@@ -11,6 +11,10 @@ use std::{
 use flate2::read::MultiGzDecoder;
 use heisenbase::material_key::MaterialKey;
 use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
+use polars::{
+    error::PolarsError,
+    prelude::{DataFrame, NamedFrom, ParquetWriter, Series},
+};
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 
 const PGN_ROOT: &str = "./data/fishtest_pgns";
@@ -20,6 +24,7 @@ const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
 const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
 const INVALID_FEN_POSITION_PREFIX: &str = "invalid FEN position:";
 const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
+const PARQUET_PATH: &str = "./data/pgn_index.parquet";
 
 pub fn run() -> io::Result<()> {
     let mut files = Vec::new();
@@ -45,14 +50,22 @@ pub fn run() -> io::Result<()> {
     let mut entries: Vec<_> = counts.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-    for (idx, (key, count)) in entries.into_iter().take(TOP_COUNT).enumerate() {
+    for (idx, (key, count)) in entries.iter().take(TOP_COUNT).enumerate() {
         let percent = if total_games == 0 {
             0.0
         } else {
-            (count as f64 / total_games as f64) * 100.0
+            (*count as f64 / total_games as f64) * 100.0
         };
-        println!("{:>2}. {} ({} games, {:.2}%)", idx + 1, key, count, percent);
+        println!(
+            "{:>2}. {} ({} games, {:.2}%)",
+            idx + 1,
+            key,
+            *count,
+            percent
+        );
     }
+
+    write_full_index(&entries)?;
 
     Ok(())
 }
@@ -88,6 +101,36 @@ fn process_reader<R: Read>(
     }
     skipped.report(path);
     Ok(visitor.games)
+}
+
+fn write_full_index(entries: &[(MaterialKey, u64)]) -> io::Result<()> {
+    let mut material_keys = Vec::with_capacity(entries.len());
+    let mut counts = Vec::with_capacity(entries.len());
+    for (key, count) in entries {
+        material_keys.push(key.to_string());
+        counts.push(*count);
+    }
+
+    if let Some(parent) = Path::new(PARQUET_PATH).parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut df = DataFrame::new(vec![
+        Series::new("material_key", material_keys),
+        Series::new("num_games", counts),
+    ])
+    .map_err(polars_to_io_error)?;
+
+    let file = File::create(PARQUET_PATH)?;
+    ParquetWriter::new(file)
+        .finish(&mut df)
+        .map_err(polars_to_io_error)?;
+
+    Ok(())
+}
+
+fn polars_to_io_error(err: PolarsError) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, err.to_string())
 }
 
 struct IndexVisitor<'a> {

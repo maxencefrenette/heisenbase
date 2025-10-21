@@ -23,3 +23,4 @@ target
 # Data stored within the repo
 data/
 .DS_Store
+.venv/
