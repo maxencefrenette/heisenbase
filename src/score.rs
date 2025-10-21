@@ -251,4 +251,63 @@ mod tests {
         assert_eq!(draw_range.add_half_move(), draw_range);
         assert_eq!(illegal_range.add_half_move(), illegal_range);
     }
+
+    #[test]
+    fn wdl_and_dtz_round_trip() {
+        use WdlScoreRange::*;
+
+        let cases = [
+            (
+                Unknown,
+                DtzScoreRange {
+                    min: DtzScore::immediate_loss(),
+                    max: DtzScore::immediate_win(),
+                },
+            ),
+            (
+                WinOrDraw,
+                DtzScoreRange {
+                    min: DtzScore::draw(),
+                    max: DtzScore::immediate_win(),
+                },
+            ),
+            (
+                DrawOrLoss,
+                DtzScoreRange {
+                    min: DtzScore::immediate_loss(),
+                    max: DtzScore::draw(),
+                },
+            ),
+            (
+                Win,
+                DtzScoreRange {
+                    min: DtzScore::immediate_win(),
+                    max: DtzScore::immediate_win(),
+                },
+            ),
+            (
+                Draw,
+                DtzScoreRange {
+                    min: DtzScore::draw(),
+                    max: DtzScore::draw(),
+                },
+            ),
+            (
+                Loss,
+                DtzScoreRange {
+                    min: DtzScore::immediate_loss(),
+                    max: DtzScore::immediate_loss(),
+                },
+            ),
+            (IllegalPosition, DtzScoreRange::illegal()),
+        ];
+
+        for (wdl_range, expected_dtz_range) in cases {
+            let dtz_range: DtzScoreRange = wdl_range.into();
+            assert_eq!(dtz_range, expected_dtz_range);
+
+            let round_trip: WdlScoreRange = dtz_range.into();
+            assert_eq!(round_trip, wdl_range);
+        }
+    }
 }
