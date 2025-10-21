@@ -14,6 +14,7 @@ pub struct TableBuilder {
     pub(crate) position_indexer: PositionIndexer,
     pub(crate) positions: Vec<DtzScoreRange>,
     pub(crate) child_tables: HashMap<MaterialKey, Vec<WdlScoreRange>>,
+    pub(crate) child_indexers: HashMap<MaterialKey, PositionIndexer>,
     pub(crate) loaded_child_tables: Vec<MaterialKey>,
     pub(crate) missing_child_tables: Vec<MaterialKey>,
 }
@@ -32,6 +33,7 @@ impl TableBuilder {
         let position_indexer = PositionIndexer::new(material.clone());
         let positions_len = position_indexer.total_positions();
         let mut child_tables = HashMap::new();
+        let mut child_indexers = HashMap::new();
         let mut loaded_child_tables = Vec::new();
         let mut missing_child_tables = Vec::new();
 
@@ -46,6 +48,9 @@ impl TableBuilder {
                     }
                     let table = decompress_wdl(&compressed);
                     child_tables.insert(child_key.clone(), table);
+                    child_indexers
+                        .entry(child_key.clone())
+                        .or_insert_with(|| PositionIndexer::new(child_key.clone()));
                     loaded_child_tables.push(child_key);
                 }
                 Err(_) => {
@@ -59,6 +64,7 @@ impl TableBuilder {
             position_indexer,
             positions: vec![DtzScoreRange::unknown(); positions_len],
             child_tables,
+            child_indexers,
             loaded_child_tables,
             missing_child_tables,
         }
@@ -202,8 +208,10 @@ impl TableBuilder {
                 Some(key) => key,
                 None => return DtzScoreRange::unknown(),
             };
-            if let Some(table) = self.child_tables.get(&child_key) {
-                let child_indexer = PositionIndexer::new(child_key.clone());
+            if let (Some(table), Some(child_indexer)) = (
+                self.child_tables.get(&child_key),
+                self.child_indexers.get(&child_key),
+            ) {
                 match child_indexer.position_to_index(&child_position) {
                     Ok(idx) => DtzScoreRange::from(table[idx]),
                     Err(_) => DtzScoreRange::unknown(),
@@ -243,6 +251,7 @@ mod tests {
             position_indexer: PositionIndexer::new(material),
             positions: Vec::new(),
             child_tables: HashMap::new(),
+            child_indexers: HashMap::new(),
             loaded_child_tables: Vec::new(),
             missing_child_tables: Vec::new(),
         };
@@ -376,6 +385,72 @@ mod tests {
             .collect();
         assert_eq!(loaded, vec!["KvK".to_string()]);
         assert!(tb.missing_child_materials().is_empty());
+        assert!(tb.child_indexers.contains_key(&child_key));
+
+        fs::remove_file(path).unwrap();
+        fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn capture_positions_use_cached_child_indexers() {
+        let material = MaterialKey::from_string("KQvKR").unwrap();
+        let data_dir = temp_data_dir("capture_cached");
+
+        let child_key = MaterialKey::from_string("KQvK").unwrap();
+        let child_indexer = PositionIndexer::new(child_key.clone());
+        let mut positions = vec![WdlScoreRange::Loss; child_indexer.total_positions()];
+
+        let parent_position: Chess = "k7/r1Q5/2K5/8/8/8/8/8 w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let capture_move = parent_position
+            .legal_moves()
+            .into_iter()
+            .find(|mv| mv.is_capture())
+            .expect("capture move available");
+        let mut child_position = parent_position.clone();
+        child_position.play_unchecked(capture_move);
+        let child_idx = child_indexer
+            .position_to_index(&child_position)
+            .expect("child position index");
+        positions[child_idx] = WdlScoreRange::Loss;
+
+        let compressed = compress_wdl(&positions);
+        let path = data_dir.join("KQvK.hbt");
+        write_wdl_file(&path, &child_key, &compressed).unwrap();
+
+        let mut tb = TableBuilder::new_with_data_dir(material, &data_dir);
+        assert!(tb.child_indexers.contains_key(&child_key));
+
+        tb.positions.fill(DtzScoreRange::draw());
+
+        let parent_position: Chess = "k7/r1Q5/2K5/8/8/8/8/8 w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+        let capture_move = parent_position
+            .legal_moves()
+            .into_iter()
+            .find(|mv| mv.is_capture())
+            .expect("capture move available");
+
+        let parent_idx = tb
+            .position_indexer
+            .position_to_index(&parent_position)
+            .expect("parent position index");
+        tb.positions[parent_idx] = DtzScoreRange::unknown();
+
+        let capture_score = tb.evaluate_move(&parent_position, capture_move).flip();
+        let capture_wdl: WdlScoreRange = capture_score.into();
+        assert_eq!(capture_wdl, WdlScoreRange::Win);
+
+        tb.step();
+
+        let parent_score: WdlScoreRange = tb.positions[parent_idx].into();
+        assert_eq!(parent_score, WdlScoreRange::Win);
 
         fs::remove_file(path).unwrap();
         fs::remove_dir_all(data_dir).unwrap();
