@@ -385,7 +385,7 @@ impl MaterialKey {
         children.into_iter().collect()
     }
 
-    pub(crate) fn from_position(position: &Chess) -> Option<Self> {
+    pub fn from_position(position: &Chess) -> Option<Self> {
         let mut counts = [[0u8; PIECES.len()]; 2];
         for square in Square::ALL {
             if let Some(piece) = position.board().piece_at(square) {

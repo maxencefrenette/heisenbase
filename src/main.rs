@@ -1,3 +1,5 @@
+mod index_pgn;
+
 use clap::{Parser, Subcommand};
 use heisenbase::compression::compress_wdl;
 use heisenbase::material_key::MaterialKey;
@@ -20,6 +22,8 @@ enum Commands {
         /// Material key describing pieces, e.g. `KQvK`.
         material_key: String,
     },
+    /// Index PGN files to find the most common material keys.
+    IndexPgn,
 }
 
 fn main() {
@@ -85,6 +89,12 @@ fn main() {
             write_wdl_file(&filename, &wdl_table.material, &compressed)
                 .expect("failed to write table file");
             println!("Wrote table to {}", filename);
+        }
+        Commands::IndexPgn => {
+            if let Err(err) = index_pgn::run() {
+                eprintln!("index-pgn failed: {err}");
+                std::process::exit(1);
+            }
         }
     }
 }
