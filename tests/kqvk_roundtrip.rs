@@ -11,9 +11,7 @@ use heisenbase::{
 use shakmaty::Position;
 use std::fs;
 
-#[test]
-#[ignore]
-fn compress_decompress_kqvk_table_round_trip() {
+fn build_kqvk_table_one_iteration() -> WdlTable {
     let material = MaterialKey::from_string("KQvK").unwrap();
     let indexer = PositionIndexer::new(material.clone());
     let total = indexer.total_positions();
@@ -33,10 +31,17 @@ fn compress_decompress_kqvk_table_round_trip() {
         };
         positions.push(wdl);
     }
-    let table = WdlTable {
+
+    WdlTable {
         material,
         positions,
-    };
+    }
+}
+
+#[test]
+#[ignore]
+fn compress_decompress_kqvk_table_round_trip() {
+    let table = build_kqvk_table_one_iteration();
     let compressed = compress_wdl(&table.positions);
     let decompressed = decompress_wdl(&compressed);
     assert_eq!(decompressed, table.positions);
@@ -45,30 +50,7 @@ fn compress_decompress_kqvk_table_round_trip() {
 #[test]
 #[ignore]
 fn write_read_round_trip() {
-    let material = MaterialKey::from_string("KQvK").unwrap();
-    let indexer = PositionIndexer::new(material.clone());
-    let total = indexer.total_positions();
-    let mut positions = Vec::with_capacity(total);
-    for idx in 0..total {
-        let wdl = match indexer.index_to_position(idx) {
-            Ok(position) => {
-                if position.is_checkmate() {
-                    WdlScoreRange::Loss
-                } else if position.is_stalemate() || position.is_insufficient_material() {
-                    WdlScoreRange::Draw
-                } else {
-                    WdlScoreRange::Unknown
-                }
-            }
-            Err(_) => WdlScoreRange::Unknown,
-        };
-        positions.push(wdl);
-    }
-
-    let table = WdlTable {
-        material,
-        positions,
-    };
+    let table = build_kqvk_table_one_iteration();
 
     let compressed = compress_wdl(&table.positions);
 
