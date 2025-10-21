@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use heisenbase::material_key::MaterialKey;
 use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
@@ -16,6 +16,10 @@ use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 const PGN_ROOT: &str = "./data/fishtest_pgns";
 const TOP_COUNT: usize = 50;
 const MAX_NON_PAWN: u32 = 5;
+const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
+const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
+const INVALID_FEN_POSITION_PREFIX: &str = "invalid FEN position:";
+const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
 
 pub fn run() -> io::Result<()> {
     let mut files = Vec::new();
@@ -26,11 +30,12 @@ pub fn run() -> io::Result<()> {
     let mut total_games: u64 = 0;
 
     for path in files {
+        println!("Processing {}", path.display());
         let file = File::open(&path)?;
         let game_count = if is_gz(&path) {
-            process_reader(GzDecoder::new(file), &mut counts)?
+            process_reader(MultiGzDecoder::new(file), &mut counts, &path)?
         } else {
-            process_reader(file, &mut counts)?
+            process_reader(file, &mut counts, &path)?
         };
         total_games += game_count;
     }
@@ -52,12 +57,36 @@ pub fn run() -> io::Result<()> {
     Ok(())
 }
 
-fn process_reader<R: Read>(reader: R, counts: &mut HashMap<MaterialKey, u64>) -> io::Result<u64> {
+fn process_reader<R: Read>(
+    reader: R,
+    counts: &mut HashMap<MaterialKey, u64>,
+    path: &Path,
+) -> io::Result<u64> {
     let mut reader = Reader::new(reader);
     let mut visitor = IndexVisitor { counts, games: 0 };
-    while let Some(result) = reader.read_game(&mut visitor)? {
-        result?;
+    let mut skipped = SkipStats::default();
+    loop {
+        match reader.read_game(&mut visitor) {
+            Ok(Some(result)) => match result {
+                Ok(()) => {}
+                Err(err) => {
+                    if !classify_skip_error(&err, &mut skipped) {
+                        return Err(err);
+                    }
+                }
+            },
+            Ok(None) => break,
+            Err(err) if is_corrupt_gzip_error(&err) => {
+                eprintln!(
+                    "Stopped early due to corrupt gzip data in {}: {err}",
+                    path.display()
+                );
+                break;
+            }
+            Err(err) => return Err(err),
+        }
     }
+    skipped.report(path);
     Ok(visitor.games)
 }
 
@@ -187,4 +216,72 @@ fn is_pgn(path: &Path) -> bool {
 
 fn is_gz(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("gz")
+}
+
+fn is_illegal_move_error(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::InvalidData && err.to_string().starts_with(ILLEGAL_MOVE_PREFIX)
+}
+
+fn is_corrupt_gzip_error(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        io::ErrorKind::InvalidData | io::ErrorKind::InvalidInput
+    ) && err.to_string().starts_with(CORRUPT_GZIP_PREFIX)
+}
+
+fn is_invalid_fen_tag_error(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::InvalidData && err.to_string().starts_with(INVALID_FEN_TAG_PREFIX)
+}
+
+fn is_invalid_fen_position_error(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::InvalidData
+        && err.to_string().starts_with(INVALID_FEN_POSITION_PREFIX)
+}
+
+#[derive(Default)]
+struct SkipStats {
+    illegal_moves: u64,
+    invalid_fen_tags: u64,
+    invalid_fen_positions: u64,
+}
+
+impl SkipStats {
+    fn report(&self, path: &Path) {
+        if self.illegal_moves > 0 {
+            eprintln!(
+                "Skipped {} games due to illegal moves in {}.",
+                self.illegal_moves,
+                path.display()
+            );
+        }
+        if self.invalid_fen_tags > 0 {
+            eprintln!(
+                "Skipped {} games due to invalid FEN tags in {}.",
+                self.invalid_fen_tags,
+                path.display()
+            );
+        }
+        if self.invalid_fen_positions > 0 {
+            eprintln!(
+                "Skipped {} games due to invalid FEN positions in {}.",
+                self.invalid_fen_positions,
+                path.display()
+            );
+        }
+    }
+}
+
+fn classify_skip_error(err: &io::Error, stats: &mut SkipStats) -> bool {
+    if is_illegal_move_error(err) {
+        stats.illegal_moves += 1;
+        true
+    } else if is_invalid_fen_tag_error(err) {
+        stats.invalid_fen_tags += 1;
+        true
+    } else if is_invalid_fen_position_error(err) {
+        stats.invalid_fen_positions += 1;
+        true
+    } else {
+        false
+    }
 }
