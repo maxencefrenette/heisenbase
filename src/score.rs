@@ -213,3 +213,42 @@ impl From<WdlScoreRange> for DtzScoreRange {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_half_move_adjusts_bounds() {
+        let positive_range = DtzScoreRange {
+            min: DtzScore(5),
+            max: DtzScore(10),
+        };
+        let negative_range = DtzScoreRange {
+            min: DtzScore(-10),
+            max: DtzScore(-5),
+        };
+        let draw_range = DtzScoreRange {
+            min: DtzScore(0),
+            max: DtzScore(0),
+        };
+        let illegal_range = DtzScoreRange::illegal();
+
+        assert_eq!(
+            positive_range.add_half_move(),
+            DtzScoreRange {
+                min: DtzScore(4),
+                max: DtzScore(9),
+            }
+        );
+        assert_eq!(
+            negative_range.add_half_move(),
+            DtzScoreRange {
+                min: DtzScore(-9),
+                max: DtzScore(-4),
+            }
+        );
+        assert_eq!(draw_range.add_half_move(), draw_range);
+        assert_eq!(illegal_range.add_half_move(), illegal_range);
+    }
+}
