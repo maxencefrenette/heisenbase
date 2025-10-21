@@ -1,10 +1,10 @@
 # Canonicalization
 
-Positions need to be canonicalized to ensure that each position's information is stored only once. This is a two-stage process. First, the material key is canonicalized, then the position itself is canonicalized withing that material key.
+Positions need to be canonicalized to ensure that each position's information is stored only once. This is a two-stage process. First, the material key is canonicalized, then the position itself is canonicalized within that material key.
 
 ## Side to move canonicalization
 
-In positions where each side has exactly the same material (e.g. KQvKQ, KRvKR, KBdvKBd, etc.), we can flip the side to move. This is orthogonal to everything that follows. This will be implemented by not considering the side to move when mapping positions to an index in the table. This is not implemented yet.
+In positions where each side has exactly the same material (e.g. KQvKQ, KRvKR, KBdvKBd, etc.), we can flip the side to move. This is orthogonal to everything that follows. The long-term plan is to handle this by ignoring the side to move when mapping positions to an index in the table. The current implementation still records the side to move, so symmetric positions for opposite players map to distinct indices.
 
 ## Starting point
 
@@ -30,7 +30,15 @@ In a pawned position, only 4 valid transformations are allowed
 
 ### Sorting
 
-Material keys are first sorted such that the strong side comes first and every piece is ordered in [K, Q, R, Bd, Bl, NP] order. The strong side is defined as 
+Material keys are first sorted such that the strong side comes first and every piece is ordered in [K, Q, R, Bd, Bl, NP] order. The strong side is defined as the side that wins the first comparison in the following sequence:
+
+1. Compare the number of queens.
+2. If tied, compare the number of rooks.
+3. If still tied, compare the total number of bishops.
+4. If still tied, compare the number of knights.
+5. If still tied, compare the number of pawns.
+
+If all of these comparisons are tied, then the material is symmetrical and sides don't matter.
 
 For instance:
 
@@ -38,7 +46,7 @@ For instance:
 
 ### Flipping bishop colors
 
-If the material key contains bishops, the colors of the bishops are flipped to prioritize the material key with the smallest lexigopgraphic order.
+If the material key contains bishops, the colors of the bishops are flipped to prioritize the material key with the smallest lexicographic order.
 
 For instance:
 
@@ -72,4 +80,4 @@ The strong side king is placed anywhere on the board. The weak king is placed an
 
 ### Other pieces canonicalization
 
-Once the kings are canonicalized, for the vast majority of KK buckets, there is no remaing transformation allowed. For simplicity, we will not apply any further transformation even when such cases are allowed.
+Once the kings are canonicalized, for the vast majority of KK buckets, there is no remaining transformation allowed. For simplicity, we will not apply any further transformation even when such cases are allowed.
