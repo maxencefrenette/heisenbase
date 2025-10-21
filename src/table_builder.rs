@@ -1,6 +1,6 @@
 use crate::compression::decompress_wdl;
 use crate::material_key::{MaterialError, MaterialKey};
-use crate::position_map::{index_to_position, position_to_index, total_positions};
+use crate::position_map::PositionIndexer;
 use crate::score::DtzScoreRange;
 use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
@@ -10,6 +10,7 @@ use std::path::Path;
 
 pub struct TableBuilder {
     pub(crate) material: MaterialKey,
+    pub(crate) position_indexer: PositionIndexer,
     pub(crate) positions: Vec<DtzScoreRange>,
     pub(crate) child_tables: HashMap<MaterialKey, Vec<WdlScoreRange>>,
     pub(crate) loaded_child_tables: Vec<MaterialKey>,
@@ -27,7 +28,8 @@ impl TableBuilder {
     }
 
     fn with_data_dir(material: MaterialKey, data_dir: &Path) -> Self {
-        let positions = total_positions(&material);
+        let position_indexer = PositionIndexer::new(material.clone());
+        let positions_len = position_indexer.total_positions();
         let mut child_tables = HashMap::new();
         let mut loaded_child_tables = Vec::new();
         let mut missing_child_tables = Vec::new();
@@ -53,7 +55,8 @@ impl TableBuilder {
 
         Self {
             material,
-            positions: vec![DtzScoreRange::unknown(); positions],
+            position_indexer,
+            positions: vec![DtzScoreRange::unknown(); positions_len],
             child_tables,
             loaded_child_tables,
             missing_child_tables,
@@ -92,7 +95,7 @@ impl TableBuilder {
                 continue;
             }
 
-            let position = match index_to_position(&self.material, pos_index) {
+            let position = match self.position_indexer.index_to_position(pos_index) {
                 Ok(p) => p,
                 Err(MaterialError::InvalidPosition(_)) => {
                     if !self.positions[pos_index].is_illegal() {
@@ -145,7 +148,10 @@ impl TableBuilder {
         let is_promotion = mv.promotion().is_some();
 
         if !mv.is_capture() && !is_promotion {
-            let child_index = position_to_index(&self.material, &child_position).unwrap();
+            let child_index = self
+                .position_indexer
+                .position_to_index(&child_position)
+                .unwrap();
             self.positions[child_index].add_half_move()
         } else if child_position.is_checkmate() {
             DtzScoreRange::checkmate()
@@ -164,7 +170,8 @@ impl TableBuilder {
                 None => return DtzScoreRange::unknown(),
             };
             if let Some(table) = self.child_tables.get(&child_key) {
-                match position_to_index(&child_key, &child_position) {
+                let child_indexer = PositionIndexer::new(child_key.clone());
+                match child_indexer.position_to_index(&child_position) {
                     Ok(idx) => DtzScoreRange::from(table[idx]),
                     Err(_) => DtzScoreRange::unknown(),
                 }
@@ -187,7 +194,7 @@ impl TableBuilder {
 mod tests {
     use super::*;
     use crate::compression::compress_wdl;
-    use crate::position_map::total_positions;
+    use crate::position_map::PositionIndexer;
     use crate::wdl_file::write_wdl_file;
     use crate::wdl_score_range::WdlScoreRange;
     use shakmaty::{CastlingMode, fen::Fen};
@@ -197,8 +204,10 @@ mod tests {
 
     #[test]
     fn position_index_roundtrip() {
+        let material = MaterialKey::from_string("KQvK").unwrap();
         let tb = TableBuilder {
-            material: MaterialKey::from_string("KQvK").unwrap(),
+            material: material.clone(),
+            position_indexer: PositionIndexer::new(material),
             positions: Vec::new(),
             child_tables: HashMap::new(),
             loaded_child_tables: Vec::new(),
@@ -211,11 +220,16 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
 
-        let index = position_to_index(&tb.material, &position).unwrap();
-        let reconstructed = index_to_position(&tb.material, index).expect("valid position");
+        let index = tb.position_indexer.position_to_index(&position).unwrap();
+        let reconstructed = tb
+            .position_indexer
+            .index_to_position(index)
+            .expect("valid position");
 
         assert_eq!(
-            position_to_index(&tb.material, &reconstructed).unwrap(),
+            tb.position_indexer
+                .position_to_index(&reconstructed)
+                .unwrap(),
             index
         );
     }
@@ -239,8 +253,8 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
 
-        let checkmate_idx = position_to_index(&tb.material, &checkmate).unwrap();
-        let stalemate_idx = position_to_index(&tb.material, &stalemate).unwrap();
+        let checkmate_idx = tb.position_indexer.position_to_index(&checkmate).unwrap();
+        let stalemate_idx = tb.position_indexer.position_to_index(&stalemate).unwrap();
 
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
         tb.positions[stalemate_idx] = DtzScoreRange::unknown();
@@ -264,7 +278,7 @@ mod tests {
             .unwrap()
             .into_position(CastlingMode::Standard)
             .unwrap();
-        let idx = position_to_index(&tb.material, &mate_in_one).unwrap();
+        let idx = tb.position_indexer.position_to_index(&mate_in_one).unwrap();
 
         // Identify the checkmate position reached after Qb7#.
         let checkmate = "k7/1Q6/2K5/8/8/8/8/8 b - - 0 1"
@@ -272,7 +286,7 @@ mod tests {
             .unwrap()
             .into_position(CastlingMode::Standard)
             .unwrap();
-        let checkmate_idx = position_to_index(&tb.material, &checkmate).unwrap();
+        let checkmate_idx = tb.position_indexer.position_to_index(&checkmate).unwrap();
 
         tb.positions[idx] = DtzScoreRange::unknown();
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
@@ -315,7 +329,8 @@ mod tests {
         let data_dir = temp_data_dir("load_child");
 
         let child_key = MaterialKey::from_string("KvK").unwrap();
-        let positions = vec![WdlScoreRange::Draw; total_positions(&child_key)];
+        let child_indexer = PositionIndexer::new(child_key.clone());
+        let positions = vec![WdlScoreRange::Draw; child_indexer.total_positions()];
         let compressed = compress_wdl(&positions);
         let path = data_dir.join("KvK.hbt");
         write_wdl_file(&path, &child_key, &compressed).unwrap();

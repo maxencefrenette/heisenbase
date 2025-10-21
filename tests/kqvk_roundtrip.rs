@@ -3,7 +3,7 @@
 use heisenbase::{
     compression::{compress_wdl, decompress_wdl},
     material_key::MaterialKey,
-    position_map::{index_to_position, total_positions},
+    position_map::PositionIndexer,
     wdl_file::{read_wdl_file, write_wdl_file},
     wdl_score_range::WdlScoreRange,
     wdl_table::WdlTable,
@@ -15,10 +15,11 @@ use std::fs;
 #[ignore]
 fn compress_decompress_kqvk_table_round_trip() {
     let material = MaterialKey::from_string("KQvK").unwrap();
-    let total = total_positions(&material);
+    let indexer = PositionIndexer::new(material.clone());
+    let total = indexer.total_positions();
     let mut positions = Vec::with_capacity(total);
     for idx in 0..total {
-        let wdl = match index_to_position(&material, idx) {
+        let wdl = match indexer.index_to_position(idx) {
             Ok(position) => {
                 if position.is_checkmate() {
                     WdlScoreRange::Loss
@@ -45,10 +46,11 @@ fn compress_decompress_kqvk_table_round_trip() {
 #[ignore]
 fn write_read_round_trip() {
     let material = MaterialKey::from_string("KQvK").unwrap();
-    let total = total_positions(&material);
+    let indexer = PositionIndexer::new(material.clone());
+    let total = indexer.total_positions();
     let mut positions = Vec::with_capacity(total);
     for idx in 0..total {
-        let wdl = match index_to_position(&material, idx) {
+        let wdl = match indexer.index_to_position(idx) {
             Ok(position) => {
                 if position.is_checkmate() {
                     WdlScoreRange::Loss
