@@ -1,3 +1,4 @@
+pub mod combinatorics;
 pub mod compression;
 pub mod material_key;
 pub mod position_map;
