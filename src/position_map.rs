@@ -10,6 +10,7 @@ use std::cmp::Ordering;
 pub struct PositionIndexer {
     material_key: MaterialKey,
     kk_buckets: Vec<(Square, Square)>,
+    kk_bucket_sizes: Vec<usize>,
     kk_buckets_inv: [usize; 64 * 64],
     total_positions: usize,
 }
@@ -348,6 +349,7 @@ fn restrict_allowed_squares(
 impl PositionIndexer {
     pub fn new(material_key: MaterialKey) -> Self {
         let mut kk_buckets = Vec::new();
+        let mut kk_bucket_sizes = Vec::new();
         let mut kk_buckets_inv = [INVALID_BUCKET; 64 * 64];
         let mut placements_without_turn = 0usize;
 
@@ -358,6 +360,7 @@ impl PositionIndexer {
             }
             let idx = kk_buckets.len();
             kk_buckets.push((strong, weak));
+            kk_bucket_sizes.push(placements);
             let strong_idx = u32::from(strong) as usize;
             let weak_idx = u32::from(weak) as usize;
             kk_buckets_inv[strong_idx * 64 + weak_idx] = idx;
@@ -373,6 +376,7 @@ impl PositionIndexer {
         Self {
             material_key,
             kk_buckets,
+            kk_bucket_sizes,
             kk_buckets_inv,
             total_positions,
         }
@@ -396,20 +400,19 @@ impl PositionIndexer {
 
         let mut remaining = index;
         let mut pair_offset = 0usize;
-        let mut selected_pair = None;
-        for &(strong, weak) in &self.kk_buckets {
-            let placements = arrangements_for_pair(&self.material_key, strong, weak);
+        let mut selected_bucket = None;
+        for (bucket_idx, &placements) in self.kk_bucket_sizes.iter().enumerate() {
             debug_assert!(placements > 0);
             if remaining < placements {
-                selected_pair = Some((strong, weak));
+                selected_bucket = Some(bucket_idx);
                 pair_offset = remaining;
                 break;
             }
             remaining -= placements;
         }
 
-        let (strong_square, weak_square) =
-            selected_pair.expect("index should be within precomputed king buckets");
+        let bucket_idx = selected_bucket.expect("index should be within precomputed king buckets");
+        let (strong_square, weak_square) = self.kk_buckets[bucket_idx];
 
         let mut setup = Setup::empty();
         setup.turn = turn;
@@ -498,15 +501,12 @@ impl PositionIndexer {
             None => return Err(MaterialError::InvalidPosition(PositionErrorKinds::empty())),
         };
 
-        let placements = arrangements_for_pair(&self.material_key, strong_square, weak_square);
+        let placements = self.kk_bucket_sizes[bucket_idx];
         if placements == 0 {
             return Err(MaterialError::InvalidPosition(PositionErrorKinds::empty()));
         }
 
-        let mut base_index = 0usize;
-        for &(strong, weak) in self.kk_buckets.iter().take(bucket_idx) {
-            base_index += arrangements_for_pair(&self.material_key, strong, weak);
-        }
+        let base_index: usize = self.kk_bucket_sizes.iter().take(bucket_idx).sum();
 
         let mut within_index = 0usize;
         let mut multiplier = 1usize;
