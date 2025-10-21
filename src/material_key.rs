@@ -189,6 +189,20 @@ impl MaterialKey {
         Some(Self::new(counts))
     }
 
+    pub fn non_pawn_piece_count(&self) -> u32 {
+        let pawn_idx = PieceDescriptor::Pawn as usize;
+        self.counts
+            .iter()
+            .map(|side| {
+                side.iter()
+                    .enumerate()
+                    .filter(|(idx, _)| *idx != pawn_idx)
+                    .map(|(_, &count)| count as u32)
+                    .sum::<u32>()
+            })
+            .sum()
+    }
+
     fn canonicalize(&mut self) {
         // Ensure that the stronger side is white.
         if Self::strong_color_from_counts(&self.counts) == Color::Black {

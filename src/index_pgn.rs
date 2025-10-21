@@ -15,6 +15,7 @@ use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 
 const PGN_ROOT: &str = "./data/fishtest_pgns";
 const TOP_COUNT: usize = 50;
+const MAX_NON_PAWN: u32 = 5;
 
 pub fn run() -> io::Result<()> {
     let mut files = Vec::new();
@@ -22,37 +23,47 @@ pub fn run() -> io::Result<()> {
     files.sort();
 
     let mut counts: HashMap<MaterialKey, u64> = HashMap::new();
+    let mut total_games: u64 = 0;
+
     for path in files {
-        if is_gz(&path) {
-            let file = File::open(&path)?;
-            process_reader(GzDecoder::new(file), &mut counts)?;
+        let file = File::open(&path)?;
+        let game_count = if is_gz(&path) {
+            process_reader(GzDecoder::new(file), &mut counts)?
         } else {
-            let file = File::open(&path)?;
-            process_reader(file, &mut counts)?;
-        }
+            process_reader(file, &mut counts)?
+        };
+        total_games += game_count;
     }
+
+    println!("Processed {total_games} games.");
 
     let mut entries: Vec<_> = counts.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     for (idx, (key, count)) in entries.into_iter().take(TOP_COUNT).enumerate() {
-        println!("{:>2}. {} ({})", idx + 1, key, count);
+        let percent = if total_games == 0 {
+            0.0
+        } else {
+            (count as f64 / total_games as f64) * 100.0
+        };
+        println!("{:>2}. {} ({} games, {:.2}%)", idx + 1, key, count, percent);
     }
 
     Ok(())
 }
 
-fn process_reader<R: Read>(reader: R, counts: &mut HashMap<MaterialKey, u64>) -> io::Result<()> {
+fn process_reader<R: Read>(reader: R, counts: &mut HashMap<MaterialKey, u64>) -> io::Result<u64> {
     let mut reader = Reader::new(reader);
-    let mut visitor = IndexVisitor { counts };
+    let mut visitor = IndexVisitor { counts, games: 0 };
     while let Some(result) = reader.read_game(&mut visitor)? {
         result?;
     }
-    Ok(())
+    Ok(visitor.games)
 }
 
 struct IndexVisitor<'a> {
     counts: &'a mut HashMap<MaterialKey, u64>,
+    games: u64,
 }
 
 struct GameState {
@@ -103,7 +114,9 @@ impl<'a> Visitor for IndexVisitor<'a> {
         let position = tags.unwrap_or_default();
         let mut seen = HashSet::new();
         if let Some(key) = MaterialKey::from_position(&position) {
-            seen.insert(key);
+            if key.non_pawn_piece_count() <= MAX_NON_PAWN {
+                seen.insert(key);
+            }
         }
         ControlFlow::Continue(GameState { position, seen })
     }
@@ -131,12 +144,15 @@ impl<'a> Visitor for IndexVisitor<'a> {
         };
         movetext.position.play_unchecked(mv);
         if let Some(key) = MaterialKey::from_position(&movetext.position) {
-            movetext.seen.insert(key);
+            if key.non_pawn_piece_count() <= MAX_NON_PAWN {
+                movetext.seen.insert(key);
+            }
         }
         ControlFlow::Continue(())
     }
 
     fn end_game(&mut self, movetext: Self::Movetext) -> Self::Output {
+        self.games += 1;
         for key in movetext.seen {
             *self.counts.entry(key).or_insert(0) += 1;
         }
