@@ -22,7 +22,7 @@ struct Cli {
 enum Commands {
     /// Generate a table for a given material key.
     Generate {
-        /// Material key describing pieces, e.g. `KQvK`.
+        /// Material key describing pieces, e.g. `Ke7vK` or `KQvK`.
         material_key: String,
     },
     /// Generate tables for many material keys that match the given filters.

@@ -19,18 +19,20 @@ In a pawnless position, there are 8 valid transformations that can be made witho
 - Diagonal flip
 - Anti-diagonal flip
 
-In a pawned position, only 4 valid transformations are allowed
+When bishops are present but no pawns exist, the diagonal flips are no longer available and only the four rotations remain.
+
+When pawns are on the board, they constrain which transforms are legal because their exact locations are preserved in the material key:
 
 - Identity
-- Rotation by 180°
-- Horizontal flip
-- Vertical flip
+- Horizontal flip (no bishops)
+
+If bishops and pawns are both present, no geometric transforms remain; the identity transform is the only legal choice.
 
 ## Material key canonicalization
 
 ### Sorting
 
-Material keys are first sorted such that the strong side comes first and every piece is ordered in [K, Q, R, Bd, Bl, NP] order. The strong side is defined as the side that wins the first comparison in the following sequence:
+Material keys are first sorted such that the strong side comes first and every non-pawn piece is ordered in [K, Q, R, Bd, Bl, N] order. The strong side is defined as the side that wins the first comparison in the following sequence:
 
 1. Compare the number of queens.
 2. If tied, compare the number of rooks.
@@ -44,15 +46,28 @@ For instance:
 
 - KvQK -> KQvK
 
-### Flipping bishop colors
+### Bishops and pawns
 
-If the material key contains bishops, the colors of the bishops are flipped to prioritize the material key with the smallest lexicographic order.
+If the material key contains bishops **and no pawns**, the colors of the bishops are flipped to prioritize the material key with the smallest lexicographic order.
 
 For instance:
 
 - KBlvKBd -> KBdvKBl
 
 If this happens, flips are no longer allowed in subsequent steps.
+
+When pawns are present we never flip bishop colors because that would change the pawn structure.
+
+### Pawn serialization
+
+Pawns are encoded by listing their algebraic squares (e.g. `a2`, `h7`) after all piece tokens for that side. The squares are taken directly from the pawn bitboards and emitted in ascending order by their numeric index (`Square::to_u32`). Examples:
+
+- `Ke7vK` – strong side king and a pawn on e7.
+- `KQb7c7vKRg2` – strong side queen with pawns on b7 and c7, weak side king with a pawn on g2.
+
+### Pawn orientation minimization
+
+After sorting and any bishop flip, the canonicalizer evaluates every transform permitted by the material (see the "Starting point" section). It applies each transform to the pawn bitboards and picks the lexicographically smallest serialization. The selected transform defines the canonical orientation for the entire key; both the pawn bitboards and the implicit choice of transform are carried forward so that downstream consumers use the same orientation.
 
 ## Position canonicalization
 
@@ -70,14 +85,14 @@ Case 2: 4 rotations allowed (pawnless positions, bishops)
 
 The strong side king is placed in the bottom-left quadrant of the board (16 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
 
-Case 3: Only horizontal flips allowed (pawnful positions, no bishops)
+Case 3: Only horizontal flips allowed (positions with pawns and no bishops)
 
-The strong side king is placed in the left half of the board (32 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
+The strong side king is placed in the left half of the board (32 possible squares). The weak king is placed anywhere else on the board such that it's not adjacent to the strong king. The horizontal flip is only applied if it keeps the pawns on the squares chosen during material canonicalization.
 
-Case 4: No transformations allowed (pawnful positions, bishops)
+Case 4: No transformations allowed (positions with pawns and bishops)
 
 The strong side king is placed anywhere on the board. The weak king is placed anywhere else on the board such that it's not adjacent to the strong king.
 
 ### Other pieces canonicalization
 
-Once the kings are canonicalized, for the vast majority of KK buckets, there is no remaining transformation allowed. For simplicity, we will not apply any further transformation even when such cases are allowed.
+Once the kings are canonicalized, the pawn bitboards from the material key are pre-placed on their fixed squares. For the vast majority of KK buckets, no transformation remains; we therefore distribute the remaining non-pawn pieces without applying additional symmetry reductions.

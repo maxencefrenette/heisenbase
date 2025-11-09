@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Write as _;
+use std::str::FromStr;
 
 use crate::transform::{Transform, TransformSet};
-use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
+use shakmaty::{Bitboard, Chess, Color, Position, PositionErrorKinds, Role, Square};
 
 /// Represents a material configuration, e.g. `KQvK`.
-
 #[derive(Clone, Copy)]
 pub(crate) enum PieceDescriptor {
     King,
@@ -79,6 +80,7 @@ pub struct MaterialKey {
     /// By convention the strong side is always first and it is encoded as white
     /// whenever we convert to a position.
     pub(crate) counts: [[u8; PIECES.len()]; 2],
+    pawn_bitboards: [Bitboard; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,10 +91,22 @@ pub enum MaterialError {
 }
 
 impl MaterialKey {
-    pub(crate) fn new(counts: [[u8; PIECES.len()]; 2]) -> Self {
-        let mut key = Self { counts };
+    pub(crate) fn new(counts: [[u8; PIECES.len()]; 2], pawn_bitboards: [Bitboard; 2]) -> Self {
+        let mut key = Self {
+            counts,
+            pawn_bitboards,
+        };
+        key.sync_pawn_counts();
         key.canonicalize();
         key
+    }
+
+    fn sync_pawn_counts(&mut self) {
+        let pawn_idx = PieceDescriptor::Pawn as usize;
+        for color_idx in 0..2 {
+            self.counts[color_idx][pawn_idx] =
+                self.pawn_bitboards[color_idx].into_iter().count() as u8;
+        }
     }
 
     /// Parse a [`MaterialKey`] from its textual representation.
@@ -103,10 +117,11 @@ impl MaterialKey {
     /// sides.
     ///
     /// # Piece tokens and colors
-    /// Supported tokens are `K`, `Q`, `R`, `Bl`, `Bd`, `N` and `P` for king,
-    /// queen, rook, light-squared bishop, dark-squared bishop, knight and pawn
-    /// respectively. Pieces appearing before the separator are interpreted as
-    /// white, while those after it are treated as black.
+    /// Supported tokens are `K`, `Q`, `R`, `Bl`, `Bd`, and `N` for king,
+    /// queen, rook, light-squared bishop, dark-squared bishop, and knight
+    /// respectively. Pawn locations are represented explicitly by algebraic
+    /// coordinates such as `e4` or `h7`. Coordinates must come after all
+    /// piece tokens for a side and are emitted in lexicographic order.
     ///
     /// # Use cases
     /// This is primarily useful for tests and simple user interfaces that need
@@ -120,73 +135,81 @@ impl MaterialKey {
         let white = parts.next()?;
         let black = parts.next()?;
 
-        // Only one separator is allowed.
         if parts.next().is_some() {
             return None;
         }
 
         let mut counts = [[0u8; PIECES.len()]; 2];
+        let mut pawns = [Bitboard::EMPTY; 2];
 
-        fn push_pieces(out: &mut [[u8; PIECES.len()]; 2], s: &str, color: Color) -> Option<()> {
+        fn parse_side(
+            out_counts: &mut [[u8; PIECES.len()]; 2],
+            out_pawns: &mut [Bitboard; 2],
+            s: &str,
+            color: Color,
+        ) -> Option<()> {
             let color_idx = match color {
                 Color::White => 0,
                 Color::Black => 1,
             };
 
-            let bytes = s.as_bytes();
             let mut i = 0;
+            let bytes = s.as_bytes();
+            let mut parsing_pawns = false;
+
             while i < bytes.len() {
-                let token = match bytes[i] as char {
+                match bytes[i] as char {
                     'B' => {
-                        if i + 1 >= bytes.len() {
+                        if parsing_pawns || i + 1 >= bytes.len() {
                             return None;
                         }
-                        match bytes[i + 1] as char {
-                            'l' => {
-                                i += 2;
-                                "Bl"
-                            }
+                        let token = match bytes[i + 1] as char {
                             'd' => {
                                 i += 2;
                                 "Bd"
                             }
+                            'l' => {
+                                i += 2;
+                                "Bl"
+                            }
                             _ => return None,
+                        };
+                        let pd = PieceDescriptor::from_token(token)?;
+                        out_counts[color_idx][pd as usize] += 1;
+                    }
+                    'K' | 'Q' | 'R' | 'N' => {
+                        if parsing_pawns {
+                            return None;
                         }
-                    }
-                    'K' => {
+                        let pd = PieceDescriptor::from_token(&s[i..i + 1])?;
+                        out_counts[color_idx][pd as usize] += 1;
                         i += 1;
-                        "K"
                     }
-                    'Q' => {
-                        i += 1;
-                        "Q"
-                    }
-                    'R' => {
-                        i += 1;
-                        "R"
-                    }
-                    'N' => {
-                        i += 1;
-                        "N"
-                    }
-                    'P' => {
-                        i += 1;
-                        "P"
+                    'a'..='h' => {
+                        parsing_pawns = true;
+                        if i + 1 >= bytes.len() {
+                            return None;
+                        }
+                        let square_str = &s[i..i + 2];
+                        let square = Square::from_str(square_str).ok()?;
+                        let bb = Bitboard::from_square(square);
+                        if !(out_pawns[color_idx] & bb).is_empty() {
+                            return None;
+                        }
+                        out_pawns[color_idx] |= bb;
+                        i += 2;
                     }
                     _ => return None,
-                };
-
-                let pd = PieceDescriptor::from_token(token)?;
-                out[color_idx][pd as usize] += 1;
+                }
             }
 
             Some(())
         }
 
-        push_pieces(&mut counts, white, Color::White)?;
-        push_pieces(&mut counts, black, Color::Black)?;
+        parse_side(&mut counts, &mut pawns, white, Color::White)?;
+        parse_side(&mut counts, &mut pawns, black, Color::Black)?;
 
-        Some(Self::new(counts))
+        Some(Self::new(counts, pawns))
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
@@ -211,15 +234,43 @@ impl MaterialKey {
     }
 
     fn canonicalize(&mut self) {
-        // Ensure that the stronger side is white.
+        self.sync_pawn_counts();
+
         if Self::strong_color_from_counts(&self.counts) == Color::Black {
             self.swap_colors();
         }
 
-        // Canonicalize bishop colors if needed.
         if self.should_swap_bishops() {
             self.flip_bishop_colors();
         }
+
+        self.canonicalize_pawns();
+        self.sync_pawn_counts();
+    }
+
+    fn canonicalize_pawns(&mut self) {
+        if !self.has_pawns() {
+            return;
+        }
+
+        let original = self.pawn_bitboards;
+        let counts = self.counts;
+        let mut best_bitboards = original;
+        let mut best_string = format_material(&counts, &original);
+
+        for &transform in self.allowed_transforms().iter() {
+            let transformed = [
+                transform_bitboard(original[0], transform),
+                transform_bitboard(original[1], transform),
+            ];
+            let serialized = format_material(&counts, &transformed);
+            if serialized < best_string {
+                best_string = serialized;
+                best_bitboards = transformed;
+            }
+        }
+
+        self.pawn_bitboards = best_bitboards;
     }
 
     fn should_swap_bishops(&self) -> bool {
@@ -270,8 +321,7 @@ impl MaterialKey {
     }
 
     pub(crate) fn has_pawns(&self) -> bool {
-        let pawn_idx = PieceDescriptor::Pawn as usize;
-        self.counts[0][pawn_idx] > 0 || self.counts[1][pawn_idx] > 0
+        !(self.pawn_bitboards[0].is_empty() && self.pawn_bitboards[1].is_empty())
     }
 
     pub(crate) fn has_bishops(&self) -> bool {
@@ -285,6 +335,7 @@ impl MaterialKey {
 
     fn swap_colors(&mut self) {
         self.counts.swap(0, 1);
+        self.pawn_bitboards.swap(0, 1);
     }
 
     /// Determines which color has the stronger material based on piece counts.
@@ -293,7 +344,7 @@ impl MaterialKey {
     ///
     /// The first factor is the total piece count.
     /// Then, it's which side has the strongest piece.
-    /// Finally, In case of a tie, White is considered stronger.
+    /// Finally, in case of a tie, White is considered stronger.
     fn strong_color_from_counts(counts: &[[u8; PIECES.len()]; 2]) -> Color {
         let compare = |white: u8, black: u8| -> Option<Color> {
             if white > black {
@@ -351,24 +402,34 @@ impl MaterialKey {
 
     pub(crate) fn child_material_keys(&self) -> Vec<MaterialKey> {
         let mut children = BTreeSet::new();
+        let pawn_idx = PieceDescriptor::Pawn as usize;
 
-        // Captures: any move that removes an opponent piece (except the king).
         for color_idx in 0..2 {
             let opponent = 1 - color_idx;
             for piece_idx in 0..PIECES.len() {
                 if piece_idx == PieceDescriptor::King as usize {
                     continue;
                 }
-                if self.counts[opponent][piece_idx] == 0 {
-                    continue;
+
+                if piece_idx == pawn_idx {
+                    if self.counts[opponent][pawn_idx] == 0 {
+                        continue;
+                    }
+                    for square in self.pawn_bitboards[opponent] {
+                        let mut counts = self.counts;
+                        let mut pawns = self.pawn_bitboards;
+                        counts[opponent][pawn_idx] -= 1;
+                        pawns[opponent] = remove_square(pawns[opponent], square);
+                        children.insert(MaterialKey::new(counts, pawns));
+                    }
+                } else if self.counts[opponent][piece_idx] > 0 {
+                    let mut counts = self.counts;
+                    counts[opponent][piece_idx] -= 1;
+                    children.insert(MaterialKey::new(counts, self.pawn_bitboards));
                 }
-                let mut counts = self.counts;
-                counts[opponent][piece_idx] -= 1;
-                children.insert(MaterialKey::new(counts));
             }
         }
 
-        // Promotions (with and without capture).
         let promo_targets = [
             PieceDescriptor::Queen,
             PieceDescriptor::Rook,
@@ -376,29 +437,48 @@ impl MaterialKey {
             PieceDescriptor::DarkBishop,
             PieceDescriptor::Knight,
         ];
-        let pawn_idx = PieceDescriptor::Pawn as usize;
+
         for color_idx in 0..2 {
-            if self.counts[color_idx][pawn_idx] == 0 {
+            let opponent = 1 - color_idx;
+            if self.pawn_bitboards[color_idx].is_empty() {
                 continue;
             }
-            let opponent = 1 - color_idx;
-            for target in promo_targets {
-                let target_idx = target as usize;
-                let mut promo_counts = self.counts;
-                promo_counts[color_idx][pawn_idx] -= 1;
-                promo_counts[color_idx][target_idx] += 1;
-                children.insert(MaterialKey::new(promo_counts));
 
-                for capture_idx in 0..PIECES.len() {
-                    if capture_idx == PieceDescriptor::King as usize {
-                        continue;
+            for pawn_square in self.pawn_bitboards[color_idx] {
+                let mut base_counts = self.counts;
+                let mut base_pawns = self.pawn_bitboards;
+                base_counts[color_idx][pawn_idx] -= 1;
+                base_pawns[color_idx] = remove_square(base_pawns[color_idx], pawn_square);
+
+                for target in promo_targets {
+                    let mut counts = base_counts;
+                    let pawns = base_pawns;
+                    counts[color_idx][target as usize] += 1;
+                    children.insert(MaterialKey::new(counts, pawns));
+
+                    for capture_idx in 0..PIECES.len() {
+                        if capture_idx == PieceDescriptor::King as usize {
+                            continue;
+                        }
+
+                        if capture_idx == pawn_idx {
+                            if self.counts[opponent][pawn_idx] == 0 {
+                                continue;
+                            }
+                            for capture_square in self.pawn_bitboards[opponent] {
+                                let mut capture_counts = counts;
+                                let mut capture_pawns = pawns;
+                                capture_counts[opponent][pawn_idx] -= 1;
+                                capture_pawns[opponent] =
+                                    remove_square(capture_pawns[opponent], capture_square);
+                                children.insert(MaterialKey::new(capture_counts, capture_pawns));
+                            }
+                        } else if self.counts[opponent][capture_idx] > 0 {
+                            let mut capture_counts = counts;
+                            capture_counts[opponent][capture_idx] -= 1;
+                            children.insert(MaterialKey::new(capture_counts, pawns));
+                        }
                     }
-                    if self.counts[opponent][capture_idx] == 0 {
-                        continue;
-                    }
-                    let mut capture_counts = promo_counts;
-                    capture_counts[opponent][capture_idx] -= 1;
-                    children.insert(MaterialKey::new(capture_counts));
                 }
             }
         }
@@ -408,6 +488,8 @@ impl MaterialKey {
 
     pub fn from_position(position: &Chess) -> Option<Self> {
         let mut counts = [[0u8; PIECES.len()]; 2];
+        let mut pawn_bitboards = [Bitboard::EMPTY; 2];
+
         for square in Square::ALL {
             if let Some(piece) = position.board().piece_at(square) {
                 let color_idx = match piece.color {
@@ -429,66 +511,108 @@ impl MaterialKey {
                     Role::Pawn => PieceDescriptor::Pawn as usize,
                 };
                 counts[color_idx][piece_idx] += 1;
+                if piece.role == Role::Pawn {
+                    pawn_bitboards[color_idx] |= Bitboard::from_square(square);
+                }
             }
         }
 
-        Some(MaterialKey::new(counts))
+        Some(MaterialKey::new(counts, pawn_bitboards))
+    }
+
+    pub(crate) fn pawn_bitboard(&self, color: Color) -> Bitboard {
+        match color {
+            Color::White => self.pawn_bitboards[0],
+            Color::Black => self.pawn_bitboards[1],
+        }
     }
 }
 
 impl fmt::Display for MaterialKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn write_bishops(f: &mut fmt::Formatter<'_>, light: u8, dark: u8) -> fmt::Result {
-            for _ in 0..dark {
-                write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
-            }
-            for _ in 0..light {
-                write!(f, "{}", PieceDescriptor::LightBishop.token())?;
-            }
-            Ok(())
+        let serialized = format_material(&self.counts, &self.pawn_bitboards);
+        f.write_str(&serialized)
+    }
+}
+
+fn transform_square(square: Square, transform: Transform) -> Square {
+    let idx = u32::from(square) as i8;
+    let file = idx % 8;
+    let rank = idx / 8;
+
+    let (new_file, new_rank) = match transform {
+        Transform::Identity => (file, rank),
+        Transform::FlipHorizontal => (7 - file, rank),
+        Transform::FlipVertical => (file, 7 - rank),
+        Transform::Rotate90 => (rank, 7 - file),
+        Transform::Rotate180 => (7 - file, 7 - rank),
+        Transform::Rotate270 => (7 - rank, file),
+        Transform::MirrorMain => (rank, file),
+        Transform::MirrorAnti => (7 - rank, 7 - file),
+    };
+
+    Square::new((new_rank * 8 + new_file) as u32)
+}
+
+fn transform_bitboard(bitboard: Bitboard, transform: Transform) -> Bitboard {
+    if matches!(transform, Transform::Identity) {
+        return bitboard;
+    }
+
+    let mut result = Bitboard::EMPTY;
+    for square in bitboard {
+        result |= Bitboard::from_square(transform_square(square, transform));
+    }
+    result
+}
+
+fn remove_square(bitboard: Bitboard, square: Square) -> Bitboard {
+    bitboard & !Bitboard::from_square(square)
+}
+
+fn format_material(counts: &[[u8; PIECES.len()]; 2], pawns: &[Bitboard; 2]) -> String {
+    let mut out = String::new();
+
+    for color_idx in 0..2 {
+        if color_idx == 1 {
+            out.push('v');
+        }
+
+        let side = &counts[color_idx];
+
+        for _ in 0..side[PieceDescriptor::King as usize] {
+            out.push_str(PieceDescriptor::King.token());
+        }
+
+        for _ in 0..side[PieceDescriptor::Queen as usize] {
+            out.push_str(PieceDescriptor::Queen.token());
+        }
+
+        for _ in 0..side[PieceDescriptor::Rook as usize] {
+            out.push_str(PieceDescriptor::Rook.token());
         }
 
         let light_idx = PieceDescriptor::LightBishop as usize;
         let dark_idx = PieceDescriptor::DarkBishop as usize;
-
-        for color_idx in 0..2 {
-            if color_idx == 1 {
-                write!(f, "v")?;
-            }
-
-            // Manually emit pieces in canonical order to keep output stable.
-            let counts = &self.counts[color_idx];
-
-            // Always write the king first.
-            for _ in 0..counts[PieceDescriptor::King as usize] {
-                write!(f, "{}", PieceDescriptor::King.token())?;
-            }
-
-            for _ in 0..counts[PieceDescriptor::Queen as usize] {
-                write!(f, "{}", PieceDescriptor::Queen.token())?;
-            }
-
-            for _ in 0..counts[PieceDescriptor::Rook as usize] {
-                write!(f, "{}", PieceDescriptor::Rook.token())?;
-            }
-
-            let light = counts[light_idx];
-            let dark = counts[dark_idx];
-            if light > 0 || dark > 0 {
-                write_bishops(f, light, dark)?;
-            }
-
-            for _ in 0..counts[PieceDescriptor::Knight as usize] {
-                write!(f, "{}", PieceDescriptor::Knight.token())?;
-            }
-
-            for _ in 0..counts[PieceDescriptor::Pawn as usize] {
-                write!(f, "{}", PieceDescriptor::Pawn.token())?;
-            }
+        for _ in 0..side[dark_idx] {
+            out.push_str(PieceDescriptor::DarkBishop.token());
+        }
+        for _ in 0..side[light_idx] {
+            out.push_str(PieceDescriptor::LightBishop.token());
         }
 
-        Ok(())
+        for _ in 0..side[PieceDescriptor::Knight as usize] {
+            out.push_str(PieceDescriptor::Knight.token());
+        }
+
+        let mut pawn_squares: Vec<Square> = pawns[color_idx].into_iter().collect();
+        pawn_squares.sort_unstable_by_key(|sq| sq.to_u32());
+        for square in pawn_squares {
+            let _ = write!(out, "{}", square);
+        }
     }
+
+    out
 }
 
 #[cfg(test)]
@@ -522,6 +646,11 @@ mod tests {
     }
 
     #[test]
+    fn canonicalizes_mirrored_pawn_structure() {
+        assert_eq!(material_key("Kf2g2vK"), "Kb2c2vK");
+    }
+
+    #[test]
     fn rejects_invalid_char() {
         assert!(MaterialKey::from_string("KXvK").is_none());
     }
@@ -532,8 +661,13 @@ mod tests {
     }
 
     #[test]
-    fn child_keys_for_kpvk() {
-        let key = MaterialKey::from_string("KPvK").unwrap();
+    fn rejects_legacy_pawn_token() {
+        assert!(MaterialKey::from_string("KPvK").is_none());
+    }
+
+    #[test]
+    fn child_keys_for_ke2vk() {
+        let key = MaterialKey::from_string("Ke2vK").unwrap();
         let children: BTreeSet<String> = key
             .child_material_keys()
             .into_iter()
@@ -554,7 +688,7 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
         let key = MaterialKey::from_position(&position).unwrap();
-        assert_eq!(key.to_string(), "KPvK");
+        assert_eq!(key.to_string(), "Kd2vK");
     }
 
     #[test]
@@ -593,7 +727,7 @@ mod tests {
     fn allowed_transforms_with_pawns_no_bishops() {
         use crate::transform::Transform::*;
 
-        let key = MaterialKey::from_string("KPvK").unwrap();
+        let key = MaterialKey::from_string("Ke2vK").unwrap();
         assert_eq!(
             key.allowed_transforms(),
             [Identity, FlipHorizontal].as_slice()
@@ -604,39 +738,7 @@ mod tests {
     fn allowed_transforms_with_pawns_and_bishops() {
         use crate::transform::Transform::*;
 
-        let key = MaterialKey::from_string("KBdvKP").unwrap();
+        let key = MaterialKey::from_string("KBdvKe2").unwrap();
         assert_eq!(key.allowed_transforms(), [Identity].as_slice());
-    }
-
-    #[test]
-    fn transform_set_matches_pawnless_no_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Full);
-    }
-
-    #[test]
-    fn transform_set_matches_pawnless_with_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KBdvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Rotations);
-    }
-
-    #[test]
-    fn transform_set_matches_with_pawns_no_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KPvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Horizontal);
-    }
-
-    #[test]
-    fn transform_set_matches_with_pawns_and_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KBdvKP").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Identity);
     }
 }

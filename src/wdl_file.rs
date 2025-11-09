@@ -6,7 +6,7 @@ use crate::compression::CompressedWdl;
 use crate::material_key::MaterialKey;
 
 const MAGIC: &[u8; 4] = b"HBWD";
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 /// Write a compressed WDL table to a file.
 pub fn write_wdl_file<P: AsRef<Path>>(

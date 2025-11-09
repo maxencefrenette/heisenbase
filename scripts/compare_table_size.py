@@ -10,7 +10,7 @@ SYZYGY = ROOT / "syzygy"
 COMPARISONS = [
     ("KQvK", "KQvK.hbt", "KQvK.rtbw"),
     ("KRvK", "KRvK.hbt", "KRvK.rtbw"),
-    ("KPvK", "KPvK.hbt", "KPvK.rtbw"),
+    ("Kd2vK", "Kd2vK.hbt", "Kd2vK.rtbw"),
     ("KBlvK", "KBdvK.hbt", "KBvK.rtbw"),
     ("KNvK", "KNvK.hbt", "KNvK.rtbw"),
 ]

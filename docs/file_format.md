@@ -9,9 +9,9 @@ multi‑byte integers are encoded in **little endian** byte order.
 | Offset | Size | Description |
 | ------ | ---- | ----------- |
 | 0      | 4    | Magic bytes `HBWD` identifying a WDL table |
-| 4      | 1    | Format version.  Currently `1` |
+| 4      | 1    | Format version.  Currently `2` |
 | 5      | 1    | Length *N* of the material key string |
-| 6      | N    | ASCII material key (e.g. `KQvK`) |
+| 6      | N    | ASCII material key (e.g. `Ke7vK` or `KQvK`) |
 | 6+N    | 8    | Original table length (number of positions) |
 | 14+N   | 2    | Number of base symbols used for encoding |
 | 16+N   | 2    | Number *P* of substitution pairs |
@@ -28,8 +28,10 @@ compression results.  The sections appear consecutively without padding.
 ### Material Key
 
 The material key identifies which pieces are present in the table.  It is
-stored as a compact ASCII string such as `KQvK` where `v` separates the
-white and black pieces.  Its length is limited to 255 bytes.
+stored as a compact ASCII string such as `Ke7vK` (king plus pawn on e7 versus
+king) or `KQvK`.  The `v` separator splits the strong and weak sides.  Pawns
+are recorded explicitly by appending their algebraic squares after the piece
+tokens for each side.  The encoded key is limited to 255 bytes.
 
 ### Symbol Pairs
 
@@ -48,7 +50,7 @@ length.  The bitstream is padded to whole bytes.
 
 The version byte allows future changes.  Readers should verify the value
 before interpreting the rest of the file.  Files produced by the current
-implementation use version `1`.
+implementation use version `2` and older files are no longer supported.
 
 ## Example
 
@@ -56,7 +58,7 @@ The following pseudo‑code illustrates how a file can be read:
 
 ```text
 read magic, version
-assert magic == "HBWD" && version == 1
+assert magic == "HBWD" && version == 2
 read material_key_length
 read material_key_string
 read orig_len
@@ -67,4 +69,3 @@ read bit_len and bitstream
 ```
 
 The `read_wdl_file` function in the codebase follows this specification.
-

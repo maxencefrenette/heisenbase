@@ -25,10 +25,19 @@ struct PieceGroup {
     light: Option<bool>,
 }
 
+struct BoardMaterial {
+    counts: [[u8; PIECES.len()]; 2],
+    pawn_bitboards: [Bitboard; 2],
+}
+
 fn piece_groups(key: &MaterialKey) -> Vec<PieceGroup> {
     let mut groups = Vec::new();
     for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
         for (i, pd) in PIECES.iter().enumerate() {
+            if matches!(pd, PieceDescriptor::Pawn) {
+                continue;
+            }
+
             let count = key.counts[color_idx][i];
             if count > 0 {
                 groups.push(PieceGroup {
@@ -136,14 +145,14 @@ fn swap_position_colors(position: &Chess) -> Chess {
 }
 
 fn normalize_position_colors(key: &MaterialKey, position: &Chess) -> Chess {
-    let counts = count_board_pieces(position);
-    if material_counts_match(&key.counts, &counts) {
+    let material = board_material(position);
+    if material_counts_match(key, &material) {
         return position.clone();
     }
 
     let swapped = swap_position_colors(position);
-    let swapped_counts = count_board_pieces(&swapped);
-    if material_counts_match(&key.counts, &swapped_counts) {
+    let swapped_material = board_material(&swapped);
+    if material_counts_match(key, &swapped_material) {
         return swapped;
     }
 
@@ -196,6 +205,23 @@ fn king_pairs(key: &MaterialKey) -> Vec<(Square, Square)> {
 fn arrangements_for_pair(key: &MaterialKey, strong: Square, weak: Square) -> usize {
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
     squares.retain(|&sq| sq != strong && sq != weak);
+
+    let white_pawns: Vec<Square> = key.pawn_bitboard(Color::White).into_iter().collect();
+    let black_pawns: Vec<Square> = key.pawn_bitboard(Color::Black).into_iter().collect();
+
+    for &square in &white_pawns {
+        if square == strong || square == weak {
+            return 0;
+        }
+    }
+    for &square in &black_pawns {
+        if square == strong || square == weak {
+            return 0;
+        }
+    }
+
+    squares.retain(|&sq| !white_pawns.contains(&sq) && !black_pawns.contains(&sq));
+
     let mut total = 1usize;
     for group in piece_groups(key) {
         if group.piece.role == shakmaty::Role::King {
@@ -242,32 +268,44 @@ fn apply_transform(position: &Chess, transform: Transform) -> Chess {
         .expect("transforming a valid position should remain valid")
 }
 
-fn count_board_pieces(position: &Chess) -> [[u8; PIECES.len()]; 2] {
+fn board_material(position: &Chess) -> BoardMaterial {
     let mut counts = [[0u8; PIECES.len()]; 2];
-    for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
-        for (i, pd) in PIECES.iter().enumerate() {
-            let mask = match pd.light() {
-                Some(true) => Bitboard::LIGHT_SQUARES,
-                Some(false) => Bitboard::DARK_SQUARES,
-                None => Bitboard::FULL,
+    let mut pawns = [Bitboard::EMPTY; 2];
+
+    for square in Square::ALL {
+        if let Some(piece) = position.board().piece_at(square) {
+            let color_idx = match piece.color {
+                Color::White => 0,
+                Color::Black => 1,
             };
-            let piece = Piece {
-                role: pd.role(),
-                color,
+            let piece_idx = match piece.role {
+                shakmaty::Role::King => PieceDescriptor::King as usize,
+                shakmaty::Role::Queen => PieceDescriptor::Queen as usize,
+                shakmaty::Role::Rook => PieceDescriptor::Rook as usize,
+                shakmaty::Role::Bishop => {
+                    if square.is_light() {
+                        PieceDescriptor::LightBishop as usize
+                    } else {
+                        PieceDescriptor::DarkBishop as usize
+                    }
+                }
+                shakmaty::Role::Knight => PieceDescriptor::Knight as usize,
+                shakmaty::Role::Pawn => PieceDescriptor::Pawn as usize,
             };
-            let count = (position.board().by_piece(piece) & mask)
-                .into_iter()
-                .count() as u8;
-            counts[color_idx][i] = count;
+            counts[color_idx][piece_idx] += 1;
+            if piece.role == shakmaty::Role::Pawn {
+                pawns[color_idx] |= Bitboard::from_square(square);
+            }
         }
     }
-    counts
+
+    BoardMaterial {
+        counts,
+        pawn_bitboards: pawns,
+    }
 }
 
-fn material_counts_match(
-    expected: &[[u8; PIECES.len()]; 2],
-    actual: &[[u8; PIECES.len()]; 2],
-) -> bool {
+fn material_counts_match(key: &MaterialKey, actual: &BoardMaterial) -> bool {
     let queen_idx = PieceDescriptor::Queen as usize;
     let rook_idx = PieceDescriptor::Rook as usize;
     let knight_idx = PieceDescriptor::Knight as usize;
@@ -276,26 +314,31 @@ fn material_counts_match(
     let light_idx = PieceDescriptor::LightBishop as usize;
     let dark_idx = PieceDescriptor::DarkBishop as usize;
 
-    for color in 0..2 {
-        if expected[color][king_idx] != actual[color][king_idx] {
+    for (color_idx, &color) in [Color::White, Color::Black].iter().enumerate() {
+        if key.counts[color_idx][king_idx] != actual.counts[color_idx][king_idx] {
             return false;
         }
-        if expected[color][queen_idx] != actual[color][queen_idx] {
+        if key.counts[color_idx][queen_idx] != actual.counts[color_idx][queen_idx] {
             return false;
         }
-        if expected[color][rook_idx] != actual[color][rook_idx] {
+        if key.counts[color_idx][rook_idx] != actual.counts[color_idx][rook_idx] {
             return false;
         }
-        if expected[color][knight_idx] != actual[color][knight_idx] {
+        if key.counts[color_idx][knight_idx] != actual.counts[color_idx][knight_idx] {
             return false;
         }
-        if expected[color][pawn_idx] != actual[color][pawn_idx] {
+        if key.counts[color_idx][pawn_idx] != actual.counts[color_idx][pawn_idx] {
             return false;
         }
 
-        let expected_bishops = expected[color][light_idx] + expected[color][dark_idx];
-        let actual_bishops = actual[color][light_idx] + actual[color][dark_idx];
+        let expected_bishops = key.counts[color_idx][light_idx] + key.counts[color_idx][dark_idx];
+        let actual_bishops =
+            actual.counts[color_idx][light_idx] + actual.counts[color_idx][dark_idx];
         if expected_bishops != actual_bishops {
+            return false;
+        }
+
+        if key.pawn_bitboard(color) != actual.pawn_bitboards[color_idx] {
             return false;
         }
     }
@@ -323,8 +366,12 @@ fn canonicalize_position(key: &MaterialKey, position: &Chess) -> Chess {
 
     let mut fallback = None;
     for &transform in key.allowed_transforms().iter() {
-        let transformed_king = transform_square(king_square, transform);
         let transformed = apply_transform(&normalized, transform);
+        if !material_counts_match(key, &board_material(&transformed)) {
+            continue;
+        }
+
+        let transformed_king = transform_square(king_square, transform);
         if strong_king_allowed_square(key, transformed_king) {
             return transformed;
         }
@@ -436,6 +483,34 @@ impl PositionIndexer {
 
         squares.retain(|&sq| sq != strong_square && sq != weak_square);
 
+        for square in self.material_key.pawn_bitboard(Color::White) {
+            if square == strong_square || square == weak_square {
+                return Err(MaterialError::InvalidPosition(PositionErrorKinds::empty()));
+            }
+            setup.board.set_piece_at(
+                square,
+                Piece {
+                    role: shakmaty::Role::Pawn,
+                    color: Color::White,
+                },
+            );
+            squares.retain(|&sq| sq != square);
+        }
+
+        for square in self.material_key.pawn_bitboard(Color::Black) {
+            if square == strong_square || square == weak_square {
+                return Err(MaterialError::InvalidPosition(PositionErrorKinds::empty()));
+            }
+            setup.board.set_piece_at(
+                square,
+                Piece {
+                    role: shakmaty::Role::Pawn,
+                    color: Color::Black,
+                },
+            );
+            squares.retain(|&sq| sq != square);
+        }
+
         for group in piece_groups(&self.material_key) {
             if group.piece.role == shakmaty::Role::King {
                 continue;
@@ -474,8 +549,8 @@ impl PositionIndexer {
     pub fn position_to_index(&self, position: &Chess) -> Result<usize, MaterialError> {
         let canonical = canonicalize_position(&self.material_key, position);
 
-        let board_counts = count_board_pieces(&canonical);
-        if !material_counts_match(&self.material_key.counts, &board_counts) {
+        let board_material = board_material(&canonical);
+        if !material_counts_match(&self.material_key, &board_material) {
             return Err(MaterialError::MismatchedMaterial);
         }
 
@@ -512,6 +587,17 @@ impl PositionIndexer {
         let mut multiplier = 1usize;
         let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
         squares.retain(|&sq| sq != strong_square && sq != weak_square);
+        let white_pawns: Vec<Square> = self
+            .material_key
+            .pawn_bitboard(Color::White)
+            .into_iter()
+            .collect();
+        let black_pawns: Vec<Square> = self
+            .material_key
+            .pawn_bitboard(Color::Black)
+            .into_iter()
+            .collect();
+        squares.retain(|&sq| !white_pawns.contains(&sq) && !black_pawns.contains(&sq));
 
         for group in piece_groups(&self.material_key) {
             if group.piece.role == shakmaty::Role::King {
@@ -693,11 +779,11 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_flip_canonicalizes_kpvk() {
+    fn horizontal_flip_canonicalizes_single_pawn() {
         use crate::transform::Transform;
         use shakmaty::{CastlingMode, Chess, Color, Piece, Role, Setup, Square};
 
-        let mk = MaterialKey::from_string("KPvK").unwrap();
+        let mk = MaterialKey::from_string("Kc2vK").unwrap();
         let indexer = PositionIndexer::new(mk.clone());
 
         let mut setup = Setup::empty();

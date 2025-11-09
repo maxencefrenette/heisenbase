@@ -37,7 +37,7 @@ Make each pawn location explicit in the material key so that configurations such
   - `PositionIndexer` must consume the pawn bitboards to pre-place pawns on their fixed squares before distributing the remaining pieces.
   - `TableBuilder` should treat pawn bitboards as fixed during move generation, captures, and promotions; when a pawn is removed, child keys inherit the parent’s updated bitboard.
   - `index_pgn` creates counts keyed by the full pawn-aware key; PGN traversal must canonicalize positions with the new logic so that transposed pawn structures map to the same key.
-  - `wdl_file` writer bumps the format version to `2` and persists the pawn-aware key. The reader supports both version `1` (legacy count-only keys) and `2` (new format) to smooth migration.
+  - `wdl_file` writer bumps the format version to `2` and persists the pawn-aware key. The reader only accepts version `2`; legacy tables must be regenerated.
   - CLI commands, docs, and examples should accept/read the extended syntax (e.g., `cargo run --release -- generate Ke7vK`).
 - **Validation**
   - Update existing unit tests to cover parsing, formatting, canonicalization, and transform minimization with pawn coordinates.
@@ -56,7 +56,7 @@ Make each pawn location explicit in the material key so that configurations such
    - Update `PositionIndexer`, `TableBuilder`, and any logic iterating over pawns to use the bitboard representation when pre-placing pawns.
    - Ensure `child_material_keys` updates the bitboards to reflect captures and promotions square-by-square.
 5. **File format & CLI**
-   - Bump WDL format version to `2`, update `docs/file_format.md`, and modify `wdl_file::{read, write}` plus CLI argument validation.
+   - Bump WDL format version to `2`, drop support for the legacy format, update `docs/file_format.md`, and modify `wdl_file::{read, write}` plus CLI argument validation.
    - Refresh documentation (`docs/canonicalization.md`, `docs/conventions.md`) and command examples.
 6. **Migration workflow**
    - Regenerate PGN indexes and WDL tables under the new naming scheme.
