@@ -1,7 +1,7 @@
 mod index_pgn;
 
 use clap::{Parser, Subcommand};
-use polars::prelude::{AnyValue, ParquetReader, SerReader};
+use polars::prelude::{ParquetReader, SerReader};
 use std::{error::Error, fs::File, io, path::Path};
 
 use heisenbase::compression::compress_wdl;
@@ -128,91 +128,31 @@ fn run_generate(material: MaterialKey) -> io::Result<()> {
 }
 
 fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), Box<dyn Error>> {
-    if max_pieces == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "max-pieces must be greater than zero",
-        )
-        .into());
-    }
+    let df = ParquetReader::new(File::open(index_pgn::PARQUET_PATH)?)
+        .finish()
+        .expect("invalid parquet data");
 
-    let path = Path::new(index_pgn::PARQUET_PATH);
-    let file = File::open(path).map_err(|err| {
-        io::Error::new(
-            err.kind(),
-            format!("failed to open index at {}: {err}", path.display()),
-        )
-    })?;
-    let reader = ParquetReader::new(file);
-    let df = reader.finish()?;
-
-    let material_series = df.column("material_key")?;
-    let games_series = df.column("num_games")?;
-
-    if material_series.len() != games_series.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "material_key and num_games columns differ in length",
-        )
-        .into());
-    }
+    let keys = df
+        .column("material_key")
+        .expect("missing material_key column")
+        .str()
+        .expect("material_key not utf8")
+        .into_iter();
+    let games = df
+        .column("num_games")
+        .expect("missing num_games column")
+        .u64()
+        .expect("num_games not u64")
+        .into_iter();
 
     let mut candidates = Vec::new();
-    for (key_val, count_val) in material_series.iter().zip(games_series.iter()) {
-        let key = match key_val {
-            AnyValue::String(s) => s.to_owned(),
-            AnyValue::StringOwned(s) => s.as_str().to_owned(),
-            AnyValue::Null => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "material_key column contains null values",
-                )
-                .into());
-            }
-            other => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("material_key column contains unexpected value: {other:?}"),
-                )
-                .into());
-            }
-        };
-        let count = match count_val {
-            AnyValue::UInt64(v) => v,
-            AnyValue::UInt32(v) => v as u64,
-            AnyValue::UInt16(v) => v as u64,
-            AnyValue::UInt8(v) => v as u64,
-            AnyValue::Int64(v) if v >= 0 => v as u64,
-            AnyValue::Int32(v) if v >= 0 => v as u64,
-            AnyValue::Int16(v) if v >= 0 => v as u64,
-            AnyValue::Int8(v) if v >= 0 => v as u64,
-            AnyValue::Null => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("num_games missing for material key {}", key),
-                )
-                .into());
-            }
-            other => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "num_games column contains unexpected value for material key {}: {other:?}",
-                        key
-                    ),
-                )
-                .into());
-            }
-        };
+    for (key, count) in keys.zip(games) {
+        let count = count.expect("num_games null");
         if count < min_games {
             continue;
         }
-        let material = MaterialKey::from_string(&key).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid material key in index: {key}"),
-            )
-        })?;
+        let material = MaterialKey::from_string(key.expect("material_key null"))
+            .expect("invalid material key");
         if material.total_piece_count() > max_pieces {
             continue;
         }
