@@ -193,7 +193,8 @@ fn king_pairs(key: &MaterialKey) -> Vec<(Square, Square)> {
     pairs
 }
 
-fn arrangements_for_pair(key: &MaterialKey, strong: Square, weak: Square) -> usize {
+/// Returns the number of arrangements for a given king pair.
+fn arrangements_for_king_pair(key: &MaterialKey, strong: Square, weak: Square) -> usize {
     let mut squares: Vec<Square> = (0..64).map(|i| Square::new(i as u32)).collect();
     squares.retain(|&sq| sq != strong && sq != weak);
     let mut total = 1usize;
@@ -355,7 +356,7 @@ impl PositionIndexer {
         let mut placements_without_turn = 0usize;
 
         for (strong, weak) in king_pairs(&material_key) {
-            let placements = arrangements_for_pair(&material_key, strong, weak);
+            let placements = arrangements_for_king_pair(&material_key, strong, weak);
             if placements == 0 {
                 continue;
             }
@@ -606,7 +607,7 @@ mod tests {
         let mk = MaterialKey::from_string("KQvK").unwrap();
         let expected: usize = king_pairs(&mk)
             .into_iter()
-            .map(|(strong, weak)| arrangements_for_pair(&mk, strong, weak))
+            .map(|(strong, weak)| arrangements_for_king_pair(&mk, strong, weak))
             .sum();
         let indexer = PositionIndexer::new(mk.clone());
         assert_eq!(indexer.total_positions(), expected * 2);
@@ -617,7 +618,7 @@ mod tests {
         let mk = MaterialKey::from_string("KNNvK").unwrap();
         let expected: usize = king_pairs(&mk)
             .into_iter()
-            .map(|(strong, weak)| arrangements_for_pair(&mk, strong, weak))
+            .map(|(strong, weak)| arrangements_for_king_pair(&mk, strong, weak))
             .sum();
         let indexer = PositionIndexer::new(mk.clone());
         assert_eq!(indexer.total_positions(), expected * 2);
