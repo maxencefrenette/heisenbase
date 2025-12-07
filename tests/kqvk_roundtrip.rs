@@ -1,7 +1,6 @@
 // These tests cover the full WDL roundtrip pipeline: one isolates the in-memory
 // compression codec, the other (ignored) layers the file format and metadata on top.
 use heisenbase::{
-    compression::{compress_wdl, decompress_wdl},
     material_key::MaterialKey,
     position_map::PositionIndexer,
     wdl_file::{read_wdl_file, write_wdl_file},
@@ -40,28 +39,15 @@ fn build_kqvk_table_one_iteration() -> WdlTable {
 
 #[test]
 #[ignore]
-fn compress_decompress_kqvk_table_round_trip() {
-    let table = build_kqvk_table_one_iteration();
-    let compressed = compress_wdl(&table.positions);
-    let decompressed = decompress_wdl(&compressed);
-    assert_eq!(decompressed, table.positions);
-}
-
-#[test]
-#[ignore]
 fn write_read_round_trip() {
     let table = build_kqvk_table_one_iteration();
 
-    let compressed = compress_wdl(&table.positions);
-
     let mut path = std::env::temp_dir();
     path.push("kqvk_test.hbt");
-    write_wdl_file(&path, &table.material, &compressed).unwrap();
+    write_wdl_file(&path, &table).unwrap();
 
-    let (read_material, read_data) = read_wdl_file(&path).unwrap();
-    assert_eq!(read_material, table.material);
-    let decompressed = decompress_wdl(&read_data);
-    assert_eq!(decompressed, table.positions);
+    let read_table = read_wdl_file(&path).unwrap();
+    assert_eq!(read_table, table);
 
     fs::remove_file(path).unwrap();
 }

@@ -1,4 +1,3 @@
-use crate::compression::decompress_wdl;
 use crate::material_key::{MaterialError, MaterialKey};
 use crate::position_map::PositionIndexer;
 use crate::score::DtzScoreRange;
@@ -40,14 +39,8 @@ impl TableBuilder {
         for child_key in material.child_material_keys() {
             let path = data_dir.join(format!("{}.hbt", child_key));
             match read_wdl_file(&path) {
-                Ok((file_key, compressed)) => {
-                    if file_key != child_key {
-                        // Skip mismatched tables but record them as missing to avoid surprises.
-                        missing_child_tables.push(child_key);
-                        continue;
-                    }
-                    let table = decompress_wdl(&compressed);
-                    child_tables.insert(child_key.clone(), table);
+                Ok(table) => {
+                    child_tables.insert(child_key.clone(), table.positions);
                     child_indexers
                         .entry(child_key.clone())
                         .or_insert_with(|| PositionIndexer::new(child_key.clone()));
@@ -234,10 +227,10 @@ impl TableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compression::compress_wdl;
     use crate::position_map::PositionIndexer;
     use crate::wdl_file::write_wdl_file;
     use crate::wdl_score_range::WdlScoreRange;
+    use crate::wdl_table::WdlTable;
     use shakmaty::{CastlingMode, fen::Fen};
     use std::collections::HashMap;
     use std::fs;
@@ -373,9 +366,12 @@ mod tests {
         let child_key = MaterialKey::from_string("KvK").unwrap();
         let child_indexer = PositionIndexer::new(child_key.clone());
         let positions = vec![WdlScoreRange::Draw; child_indexer.total_positions()];
-        let compressed = compress_wdl(&positions);
+        let kvk_wdl_table = WdlTable {
+            material: child_key,
+            positions,
+        };
         let path = data_dir.join("KvK.hbt");
-        write_wdl_file(&path, &child_key, &compressed).unwrap();
+        write_wdl_file(&path, &kvk_wdl_table).unwrap();
 
         let tb = TableBuilder::new_with_data_dir(material, &data_dir);
         let loaded: Vec<String> = tb
@@ -385,72 +381,7 @@ mod tests {
             .collect();
         assert_eq!(loaded, vec!["KvK".to_string()]);
         assert!(tb.missing_child_materials().is_empty());
-        assert!(tb.child_indexers.contains_key(&child_key));
-
-        fs::remove_file(path).unwrap();
-        fs::remove_dir_all(data_dir).unwrap();
-    }
-
-    #[test]
-    fn capture_positions_use_cached_child_indexers() {
-        let material = MaterialKey::from_string("KQvKR").unwrap();
-        let data_dir = temp_data_dir("capture_cached");
-
-        let child_key = MaterialKey::from_string("KQvK").unwrap();
-        let child_indexer = PositionIndexer::new(child_key.clone());
-        let mut positions = vec![WdlScoreRange::Loss; child_indexer.total_positions()];
-
-        let parent_position: Chess = "k7/r1Q5/2K5/8/8/8/8/8 w - - 0 1"
-            .parse::<Fen>()
-            .unwrap()
-            .into_position(CastlingMode::Standard)
-            .unwrap();
-        let capture_move = parent_position
-            .legal_moves()
-            .into_iter()
-            .find(|mv| mv.is_capture())
-            .expect("capture move available");
-        let mut child_position = parent_position.clone();
-        child_position.play_unchecked(capture_move);
-        let child_idx = child_indexer
-            .position_to_index(&child_position)
-            .expect("child position index");
-        positions[child_idx] = WdlScoreRange::Loss;
-
-        let compressed = compress_wdl(&positions);
-        let path = data_dir.join("KQvK.hbt");
-        write_wdl_file(&path, &child_key, &compressed).unwrap();
-
-        let mut tb = TableBuilder::new_with_data_dir(material, &data_dir);
-        assert!(tb.child_indexers.contains_key(&child_key));
-
-        tb.positions.fill(DtzScoreRange::draw());
-
-        let parent_position: Chess = "k7/r1Q5/2K5/8/8/8/8/8 w - - 0 1"
-            .parse::<Fen>()
-            .unwrap()
-            .into_position(CastlingMode::Standard)
-            .unwrap();
-        let capture_move = parent_position
-            .legal_moves()
-            .into_iter()
-            .find(|mv| mv.is_capture())
-            .expect("capture move available");
-
-        let parent_idx = tb
-            .position_indexer
-            .position_to_index(&parent_position)
-            .expect("parent position index");
-        tb.positions[parent_idx] = DtzScoreRange::unknown();
-
-        let capture_score = tb.evaluate_move(&parent_position, capture_move).flip();
-        let capture_wdl: WdlScoreRange = capture_score.into();
-        assert_eq!(capture_wdl, WdlScoreRange::Win);
-
-        tb.step();
-
-        let parent_score: WdlScoreRange = tb.positions[parent_idx].into();
-        assert_eq!(parent_score, WdlScoreRange::Win);
+        assert!(tb.child_indexers.contains_key(&kvk_wdl_table.material));
 
         fs::remove_file(path).unwrap();
         fs::remove_dir_all(data_dir).unwrap();

@@ -2,6 +2,7 @@ use crate::material_key::MaterialKey;
 use crate::table_builder::TableBuilder;
 use crate::wdl_score_range::WdlScoreRange;
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct WdlTable {
     pub material: MaterialKey,
     pub positions: Vec<WdlScoreRange>,

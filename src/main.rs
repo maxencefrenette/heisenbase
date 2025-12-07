@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 use polars::prelude::{ParquetReader, SerReader};
 use std::{error::Error, fs::File, io, path::Path};
 
-use heisenbase::compression::compress_wdl;
 use heisenbase::material_key::MaterialKey;
 use heisenbase::table_builder::TableBuilder;
 use heisenbase::wdl_file::write_wdl_file;
@@ -120,9 +119,8 @@ fn run_generate(material: MaterialKey) -> io::Result<()> {
         };
         println!("{variant:?}: {percentage:.2}%");
     }
-    let compressed = compress_wdl(&wdl_table.positions);
     let filename = format!("./data/heisenbase/{}.hbt", wdl_table.material);
-    write_wdl_file(&filename, &wdl_table.material, &compressed)?;
+    write_wdl_file(&filename, &wdl_table)?;
     println!("Wrote table to {}", filename);
     Ok(())
 }
