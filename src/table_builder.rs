@@ -68,7 +68,7 @@ impl TableBuilder {
 
         for it in 0..MAX_STEPS {
             let progress = self.create_iteration_progress_bar(it + 1);
-            let updates = self.step_with_progress(&progress);
+            let updates = self.step(Some(&progress));
             let message = format!("Iteration {}: {} updates", it + 1, updates);
             progress.finish_with_message(message.clone());
             if progress.is_hidden() {
@@ -95,20 +95,7 @@ impl TableBuilder {
         progress
     }
 
-    /// Perform one iteration of the table builder.
-    ///
-    /// This performs one bellman update on every position in the table and returns the number of
-    /// positions that changed.
-    #[cfg(test)]
-    fn step(&mut self) -> usize {
-        self.step_internal(None)
-    }
-
-    fn step_with_progress(&mut self, progress: &ProgressBar) -> usize {
-        self.step_internal(Some(progress))
-    }
-
-    fn step_internal(&mut self, progress: Option<&ProgressBar>) -> usize {
+    fn step(&mut self, progress: Option<&ProgressBar>) -> usize {
         let mut updates = 0;
         for pos_index in 0..self.positions.len() {
             if let Some(pb) = progress {
@@ -295,7 +282,7 @@ mod tests {
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
         tb.positions[stalemate_idx] = DtzScoreRange::unknown();
 
-        tb.step();
+        tb.step(None);
 
         assert_eq!(tb.positions[checkmate_idx], DtzScoreRange::checkmate());
         assert_eq!(tb.positions[stalemate_idx], DtzScoreRange::draw());
@@ -328,9 +315,9 @@ mod tests {
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
 
         // First step marks the checkmate child.
-        tb.step();
+        tb.step(None);
         // Second step propagates to the parent position.
-        tb.step();
+        tb.step(None);
 
         let wdl: WdlScoreRange = tb.positions[idx].into();
         assert_eq!(wdl, WdlScoreRange::Win);
