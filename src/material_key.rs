@@ -1,13 +1,10 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::transform::{Transform, TransformSet};
 use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
 
-/// Represents a material configuration, e.g. `KQvK`.
-
-#[derive(Clone, Copy)]
-pub(crate) enum PieceDescriptor {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PieceDescriptor {
     King,
     Queen,
     Rook,
@@ -30,25 +27,6 @@ impl PieceDescriptor {
         }
     }
 
-    pub(crate) fn role(self) -> Role {
-        match self {
-            PieceDescriptor::King => Role::King,
-            PieceDescriptor::Queen => Role::Queen,
-            PieceDescriptor::Rook => Role::Rook,
-            PieceDescriptor::DarkBishop | PieceDescriptor::LightBishop => Role::Bishop,
-            PieceDescriptor::Knight => Role::Knight,
-            PieceDescriptor::Pawn => Role::Pawn,
-        }
-    }
-
-    pub(crate) fn light(self) -> Option<bool> {
-        match self {
-            PieceDescriptor::LightBishop => Some(true),
-            PieceDescriptor::DarkBishop => Some(false),
-            _ => None,
-        }
-    }
-
     fn from_token(tok: &str) -> Option<Self> {
         match tok {
             "K" => Some(PieceDescriptor::King),
@@ -61,9 +39,42 @@ impl PieceDescriptor {
             _ => None,
         }
     }
+
+    pub fn role(self) -> Role {
+        match self {
+            PieceDescriptor::King => Role::King,
+            PieceDescriptor::Queen => Role::Queen,
+            PieceDescriptor::Rook => Role::Rook,
+            PieceDescriptor::DarkBishop | PieceDescriptor::LightBishop => Role::Bishop,
+            PieceDescriptor::Knight => Role::Knight,
+            PieceDescriptor::Pawn => Role::Pawn,
+        }
+    }
+
+    pub fn is_bishop(self) -> bool {
+        match self {
+            PieceDescriptor::DarkBishop | PieceDescriptor::LightBishop => true,
+            _ => false,
+        }
+    }
 }
 
-pub(crate) const PIECES: [PieceDescriptor; 7] = [
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HbPiece {
+    pub role: PieceDescriptor,
+    pub color: Color,
+}
+
+impl From<HbPiece> for shakmaty::Piece {
+    fn from(hb_piece: HbPiece) -> shakmaty::Piece {
+        shakmaty::Piece {
+            role: hb_piece.role.role(),
+            color: hb_piece.color,
+        }
+    }
+}
+
+pub const PIECES: [PieceDescriptor; 7] = [
     PieceDescriptor::King,
     PieceDescriptor::Queen,
     PieceDescriptor::Rook,
@@ -73,18 +84,20 @@ pub(crate) const PIECES: [PieceDescriptor; 7] = [
     PieceDescriptor::Pawn,
 ];
 
+/// Represents a material configuration, e.g. `KQvK`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaterialKey {
     /// Piece counts indexed by color then piece descriptor.
     /// By convention the strong side is always first and it is encoded as white
     /// whenever we convert to a position.
-    pub(crate) counts: [[u8; PIECES.len()]; 2],
+    pub counts: [[u8; PIECES.len()]; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MaterialError {
     MismatchedMaterial,
     IndexOutOfBounds,
+    TwoPiecesOnSameSquare,
     InvalidPosition(PositionErrorKinds),
 }
 
@@ -269,12 +282,12 @@ impl MaterialKey {
         flat
     }
 
-    pub(crate) fn has_pawns(&self) -> bool {
+    pub fn has_pawns(&self) -> bool {
         let pawn_idx = PieceDescriptor::Pawn as usize;
         self.counts[0][pawn_idx] > 0 || self.counts[1][pawn_idx] > 0
     }
 
-    pub(crate) fn has_bishops(&self) -> bool {
+    pub fn has_bishops(&self) -> bool {
         let light_idx = PieceDescriptor::LightBishop as usize;
         let dark_idx = PieceDescriptor::DarkBishop as usize;
         self.counts[0][light_idx] > 0
@@ -336,20 +349,7 @@ impl MaterialKey {
         Color::White
     }
 
-    pub(crate) fn transform_set(&self) -> TransformSet {
-        match (!self.has_pawns(), self.has_bishops()) {
-            (true, false) => TransformSet::Full,
-            (true, true) => TransformSet::Rotations,
-            (false, false) => TransformSet::Horizontal,
-            (false, true) => TransformSet::Identity,
-        }
-    }
-
-    pub(crate) fn allowed_transforms(&self) -> &'static [Transform] {
-        self.transform_set().transforms()
-    }
-
-    pub(crate) fn child_material_keys(&self) -> Vec<MaterialKey> {
+    pub fn child_material_keys(&self) -> Vec<MaterialKey> {
         let mut children = BTreeSet::new();
 
         // Captures: any move that removes an opponent piece (except the king).
@@ -433,6 +433,21 @@ impl MaterialKey {
         }
 
         Some(MaterialKey::new(counts))
+    }
+
+    pub fn pieces(&self) -> impl Iterator<Item = HbPiece> {
+        (0..2).flat_map(move |color_index| {
+            let color = match color_index {
+                0 => Color::White,
+                1 => Color::Black,
+                _ => unreachable!(),
+            };
+
+            PIECES.iter().copied().flat_map(move |piece| {
+                (0..self.counts[color_index][piece as usize])
+                    .map(move |_| HbPiece { role: piece, color })
+            })
+        })
     }
 }
 
@@ -555,88 +570,5 @@ mod tests {
             .unwrap();
         let key = MaterialKey::from_position(&position).unwrap();
         assert_eq!(key.to_string(), "KPvK");
-    }
-
-    #[test]
-    fn allowed_transforms_pawnless_no_bishops() {
-        use crate::transform::Transform::*;
-
-        let key = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(
-            key.allowed_transforms(),
-            [
-                Identity,
-                FlipHorizontal,
-                FlipVertical,
-                Rotate90,
-                Rotate270,
-                Rotate180,
-                MirrorMain,
-                MirrorAnti
-            ]
-            .as_slice()
-        );
-    }
-
-    #[test]
-    fn allowed_transforms_pawnless_with_bishops() {
-        use crate::transform::Transform::*;
-
-        let key = MaterialKey::from_string("KBdvK").unwrap();
-        assert_eq!(
-            key.allowed_transforms(),
-            [Identity, Rotate90, Rotate180, Rotate270].as_slice()
-        );
-    }
-
-    #[test]
-    fn allowed_transforms_with_pawns_no_bishops() {
-        use crate::transform::Transform::*;
-
-        let key = MaterialKey::from_string("KPvK").unwrap();
-        assert_eq!(
-            key.allowed_transforms(),
-            [Identity, FlipHorizontal].as_slice()
-        );
-    }
-
-    #[test]
-    fn allowed_transforms_with_pawns_and_bishops() {
-        use crate::transform::Transform::*;
-
-        let key = MaterialKey::from_string("KBdvKP").unwrap();
-        assert_eq!(key.allowed_transforms(), [Identity].as_slice());
-    }
-
-    #[test]
-    fn transform_set_matches_pawnless_no_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KQvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Full);
-    }
-
-    #[test]
-    fn transform_set_matches_pawnless_with_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KBdvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Rotations);
-    }
-
-    #[test]
-    fn transform_set_matches_with_pawns_no_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KPvK").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Horizontal);
-    }
-
-    #[test]
-    fn transform_set_matches_with_pawns_and_bishops() {
-        use crate::transform::TransformSet;
-
-        let key = MaterialKey::from_string("KBdvKP").unwrap();
-        assert_eq!(key.transform_set(), TransformSet::Identity);
     }
 }

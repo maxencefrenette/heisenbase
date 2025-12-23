@@ -126,7 +126,8 @@ impl TableBuilder {
 
             let position = match self.position_indexer.index_to_position(pos_index) {
                 Ok(p) => p,
-                Err(MaterialError::InvalidPosition(_)) => {
+                Err(MaterialError::InvalidPosition(_))
+                | Err(MaterialError::TwoPiecesOnSameSquare) => {
                     if !self.positions[pos_index].is_illegal() {
                         self.positions[pos_index] = DtzScoreRange::illegal();
                         updates += 1;
