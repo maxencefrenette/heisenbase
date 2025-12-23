@@ -3,6 +3,7 @@ use crate::position_map::PositionIndexer;
 use crate::score::DtzScoreRange;
 use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
+use indicatif::ProgressIterator;
 use indicatif::{ProgressBar, ProgressStyle};
 use shakmaty::{Chess, Move, Position};
 use std::collections::HashMap;
@@ -68,14 +69,11 @@ impl TableBuilder {
         let mut positions_next = vec![DtzScoreRange::unknown(); self.positions.len()];
 
         for it in 0..MAX_STEPS {
-            let progress = self.create_iteration_progress_bar(it + 1);
+            let progress_bar = self.create_iteration_progress_bar(it + 1);
             let updates;
-            (updates, positions_next) = self.step(positions_next, Some(&progress));
-            let message = format!("Iteration {}: {} updates", it + 1, updates);
-            progress.finish_with_message(message.clone());
-            if progress.is_hidden() {
-                println!("{message}");
-            }
+            (updates, positions_next) = self.step(positions_next, progress_bar);
+            println!("Iteration {:>3}: {} updates", it + 1, updates);
+
             if updates == 0 {
                 break;
             }
@@ -93,24 +91,22 @@ impl TableBuilder {
         )
         .unwrap();
         progress.set_style(style);
-        progress.set_message(format!("Iteration {iteration}"));
+        progress.set_message(format!("Iteration {iteration:>3}"));
         progress
     }
 
     fn step(
         &mut self,
         mut positions_next: Vec<DtzScoreRange>,
-        progress: Option<&ProgressBar>,
+        progress_bar: ProgressBar,
     ) -> (usize, Vec<DtzScoreRange>) {
         let mut updates = 0;
 
         positions_next
             .iter_mut()
+            .progress_with(progress_bar)
             .enumerate()
             .for_each(|(pos_index, new_score_cell)| {
-                if let Some(pb) = progress {
-                    pb.inc(1);
-                }
                 let old_score = self.positions[pos_index];
                 let new_score = self.score_position(&self.positions, pos_index);
                 if new_score != old_score {
@@ -118,6 +114,7 @@ impl TableBuilder {
                 }
                 *new_score_cell = new_score;
             });
+
         std::mem::swap(&mut self.positions, &mut positions_next);
         (updates, positions_next)
     }
@@ -234,7 +231,6 @@ mod tests {
             material: material.clone(),
             position_indexer: PositionIndexer::new(material),
             positions: Vec::new(),
-            positions_next: Vec::new(),
             child_tables: HashMap::new(),
             child_indexers: HashMap::new(),
             loaded_child_tables: Vec::new(),
@@ -286,7 +282,10 @@ mod tests {
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
         tb.positions[stalemate_idx] = DtzScoreRange::unknown();
 
-        tb.step(None);
+        tb.step(
+            vec![DtzScoreRange::unknown(); tb.positions.len()],
+            ProgressBar::hidden(),
+        );
 
         assert_eq!(tb.positions[checkmate_idx], DtzScoreRange::checkmate());
         assert_eq!(tb.positions[stalemate_idx], DtzScoreRange::draw());
@@ -318,10 +317,11 @@ mod tests {
         tb.positions[idx] = DtzScoreRange::unknown();
         tb.positions[checkmate_idx] = DtzScoreRange::unknown();
 
+        let mut positions_next = vec![DtzScoreRange::unknown(); tb.positions.len()];
         // First step marks the checkmate child.
-        tb.step(None);
+        (_, positions_next) = tb.step(positions_next, ProgressBar::hidden());
         // Second step propagates to the parent position.
-        tb.step(None);
+        tb.step(positions_next, ProgressBar::hidden());
 
         let wdl: WdlScoreRange = tb.positions[idx].into();
         assert_eq!(wdl, WdlScoreRange::Win);
