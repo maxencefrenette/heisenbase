@@ -12,6 +12,7 @@ pub struct TableBuilder {
     pub(crate) material: MaterialKey,
     pub(crate) position_indexer: PositionIndexer,
     pub(crate) positions: Vec<DtzScoreRange>,
+    pub(crate) positions_next: Vec<DtzScoreRange>,
     pub(crate) child_tables: HashMap<MaterialKey, Vec<WdlScoreRange>>,
     pub(crate) child_indexers: HashMap<MaterialKey, PositionIndexer>,
     pub(crate) loaded_child_tables: Vec<MaterialKey>,
@@ -56,6 +57,7 @@ impl TableBuilder {
             material,
             position_indexer,
             positions: vec![DtzScoreRange::unknown(); positions_len],
+            positions_next: vec![DtzScoreRange::unknown(); positions_len],
             child_tables,
             child_indexers,
             loaded_child_tables,
@@ -102,66 +104,59 @@ impl TableBuilder {
                 pb.inc(1);
             }
             let old_score = self.positions[pos_index];
-
-            if old_score.is_illegal() {
-                continue;
-            }
-
-            if old_score.is_certain() {
-                continue;
-            }
-
-            let position = match self.position_indexer.index_to_position(pos_index) {
-                Ok(p) => p,
-                Err(MaterialError::InvalidPosition(_))
-                | Err(MaterialError::TwoPiecesOnSameSquare) => {
-                    if !self.positions[pos_index].is_illegal() {
-                        self.positions[pos_index] = DtzScoreRange::illegal();
-                        updates += 1;
-                    }
-                    continue;
-                }
-                Err(MaterialError::IndexOutOfBounds) => {
-                    debug_assert!(false, "index {} unexpectedly out of bounds", pos_index);
-                    continue;
-                }
-                Err(MaterialError::MismatchedMaterial) => {
-                    debug_assert!(false, "index {} has mismatched material", pos_index);
-                    continue;
-                }
-            };
-
-            if position.is_checkmate() {
-                self.positions[pos_index] = DtzScoreRange::checkmate();
-                updates += 1;
-                continue;
-            }
-
-            if position.is_stalemate() || position.is_insufficient_material() {
-                self.positions[pos_index] = DtzScoreRange::draw();
-                updates += 1;
-                continue;
-            }
-
-            let new_score = position
-                .legal_moves()
-                .into_iter()
-                .map(|mv| self.evaluate_move(&position, mv).flip())
-                .reduce(|a, b| a.max(&b))
-                .expect("every non-terminal position should have at least one legal move");
-
+            let new_score = self.score_position(&self.positions, pos_index);
             if new_score != old_score {
-                self.positions[pos_index] = new_score;
                 updates += 1;
             }
+            self.positions_next[pos_index] = new_score;
         }
-        if let Some(pb) = progress {
-            pb.set_position(self.positions.len() as u64);
-        }
+        std::mem::swap(&mut self.positions, &mut self.positions_next);
         updates
     }
 
-    fn evaluate_move(&self, position: &Chess, mv: Move) -> DtzScoreRange {
+    fn score_position(&self, prev_positions: &[DtzScoreRange], pos_index: usize) -> DtzScoreRange {
+        let old_score = prev_positions[pos_index];
+        if old_score.is_illegal() || old_score.is_certain() {
+            return old_score;
+        }
+
+        let position = match self.position_indexer.index_to_position(pos_index) {
+            Ok(p) => p,
+            Err(MaterialError::InvalidPosition(_)) | Err(MaterialError::TwoPiecesOnSameSquare) => {
+                return DtzScoreRange::illegal();
+            }
+            Err(MaterialError::IndexOutOfBounds) => {
+                debug_assert!(false, "index {} unexpectedly out of bounds", pos_index);
+                return old_score;
+            }
+            Err(MaterialError::MismatchedMaterial) => {
+                debug_assert!(false, "index {} has mismatched material", pos_index);
+                return old_score;
+            }
+        };
+
+        if position.is_checkmate() {
+            return DtzScoreRange::checkmate();
+        }
+
+        if position.is_stalemate() || position.is_insufficient_material() {
+            return DtzScoreRange::draw();
+        }
+
+        position
+            .legal_moves()
+            .into_iter()
+            .map(|mv| self.evaluate_move(prev_positions, &position, mv).flip())
+            .reduce(|a, b| a.max(&b))
+            .expect("every non-terminal position should have at least one legal move")
+    }
+
+    fn evaluate_move(
+        &self,
+        prev_positions: &[DtzScoreRange],
+        position: &Chess,
+        mv: Move,
+    ) -> DtzScoreRange {
         let mut child_position = position.clone();
         child_position.play_unchecked(mv);
 
@@ -172,7 +167,7 @@ impl TableBuilder {
                 .position_indexer
                 .position_to_index(&child_position)
                 .unwrap();
-            self.positions[child_index].add_half_move()
+            prev_positions[child_index].add_half_move()
         } else if child_position.is_checkmate() {
             DtzScoreRange::checkmate()
         } else if child_position.is_stalemate() || child_position.is_insufficient_material() {
@@ -231,6 +226,7 @@ mod tests {
             material: material.clone(),
             position_indexer: PositionIndexer::new(material),
             positions: Vec::new(),
+            positions_next: Vec::new(),
             child_tables: HashMap::new(),
             child_indexers: HashMap::new(),
             loaded_child_tables: Vec::new(),
