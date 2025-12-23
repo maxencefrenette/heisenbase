@@ -12,7 +12,6 @@ pub struct TableBuilder {
     pub(crate) material: MaterialKey,
     pub(crate) position_indexer: PositionIndexer,
     pub(crate) positions: Vec<DtzScoreRange>,
-    pub(crate) positions_next: Vec<DtzScoreRange>,
     pub(crate) child_tables: HashMap<MaterialKey, Vec<WdlScoreRange>>,
     pub(crate) child_indexers: HashMap<MaterialKey, PositionIndexer>,
     pub(crate) loaded_child_tables: Vec<MaterialKey>,
@@ -57,7 +56,6 @@ impl TableBuilder {
             material,
             position_indexer,
             positions: vec![DtzScoreRange::unknown(); positions_len],
-            positions_next: vec![DtzScoreRange::unknown(); positions_len],
             child_tables,
             child_indexers,
             loaded_child_tables,
@@ -67,10 +65,12 @@ impl TableBuilder {
 
     pub fn solve(&mut self) {
         const MAX_STEPS: usize = 101;
+        let mut positions_next = vec![DtzScoreRange::unknown(); self.positions.len()];
 
         for it in 0..MAX_STEPS {
             let progress = self.create_iteration_progress_bar(it + 1);
-            let updates = self.step(Some(&progress));
+            let updates;
+            (updates, positions_next) = self.step(positions_next, Some(&progress));
             let message = format!("Iteration {}: {} updates", it + 1, updates);
             progress.finish_with_message(message.clone());
             if progress.is_hidden() {
@@ -97,21 +97,29 @@ impl TableBuilder {
         progress
     }
 
-    fn step(&mut self, progress: Option<&ProgressBar>) -> usize {
+    fn step(
+        &mut self,
+        mut positions_next: Vec<DtzScoreRange>,
+        progress: Option<&ProgressBar>,
+    ) -> (usize, Vec<DtzScoreRange>) {
         let mut updates = 0;
-        for pos_index in 0..self.positions.len() {
-            if let Some(pb) = progress {
-                pb.inc(1);
-            }
-            let old_score = self.positions[pos_index];
-            let new_score = self.score_position(&self.positions, pos_index);
-            if new_score != old_score {
-                updates += 1;
-            }
-            self.positions_next[pos_index] = new_score;
-        }
-        std::mem::swap(&mut self.positions, &mut self.positions_next);
-        updates
+
+        positions_next
+            .iter_mut()
+            .enumerate()
+            .for_each(|(pos_index, new_score_cell)| {
+                if let Some(pb) = progress {
+                    pb.inc(1);
+                }
+                let old_score = self.positions[pos_index];
+                let new_score = self.score_position(&self.positions, pos_index);
+                if new_score != old_score {
+                    updates += 1;
+                }
+                *new_score_cell = new_score;
+            });
+        std::mem::swap(&mut self.positions, &mut positions_next);
+        (updates, positions_next)
     }
 
     fn score_position(&self, prev_positions: &[DtzScoreRange], pos_index: usize) -> DtzScoreRange {
