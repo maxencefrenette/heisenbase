@@ -3,8 +3,8 @@ use crate::position_map::PositionIndexer;
 use crate::score::DtzScoreRange;
 use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
-use indicatif::ProgressIterator;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use shakmaty::{Chess, Move, Position};
 use std::collections::HashMap;
 use std::path::Path;
@@ -100,20 +100,18 @@ impl TableBuilder {
         mut positions_next: Vec<DtzScoreRange>,
         progress_bar: ProgressBar,
     ) -> (usize, Vec<DtzScoreRange>) {
-        let mut updates = 0;
-
-        positions_next
-            .iter_mut()
+        let updates = positions_next
+            .par_iter_mut()
             .progress_with(progress_bar)
             .enumerate()
-            .for_each(|(pos_index, new_score_cell)| {
+            .map(|(pos_index, new_score_cell)| {
                 let old_score = self.positions[pos_index];
                 let new_score = self.score_position(&self.positions, pos_index);
-                if new_score != old_score {
-                    updates += 1;
-                }
                 *new_score_cell = new_score;
-            });
+
+                return (new_score != old_score) as usize;
+            })
+            .sum::<usize>();
 
         std::mem::swap(&mut self.positions, &mut positions_next);
         (updates, positions_next)
