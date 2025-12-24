@@ -19,3 +19,7 @@ cargo run --release -- generate KQvK
 ```
 
 This command generates a file called `KQvK.hbt` in the `data` directory.
+
+## Migration
+
+We are currently in the middle of a migration to add pawn positions to material key. See pawn_structure_migration for more details.
