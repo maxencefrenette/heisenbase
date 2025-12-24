@@ -145,12 +145,12 @@ impl MaterialKey {
     fn canonicalize(&mut self) {
         // Ensure that the stronger side is white.
         if Self::strong_color_from_counts(&self.counts) == Color::Black {
-            self.swap_colors();
+            self.mirror_sides();
         }
 
         // Canonicalize bishop colors if needed.
         if self.should_swap_bishops() {
-            self.flip_bishop_colors();
+            self.mirror_left_to_right();
         }
     }
 
@@ -169,7 +169,9 @@ impl MaterialKey {
         swapped < current
     }
 
-    fn flip_bishop_colors(&mut self) {
+    /// Mirror the board left-to-right (kingside-to-queenside)
+    fn mirror_left_to_right(&mut self) {
+        // Flip the color of the bishops on the board.
         let light_idx = HbPieceRole::LightBishop as usize;
         let dark_idx = HbPieceRole::DarkBishop as usize;
         for color_idx in 0..2 {
@@ -219,7 +221,8 @@ impl MaterialKey {
             || self.counts[1][dark_idx] > 0
     }
 
-    fn swap_colors(&mut self) {
+    /// Mirror the sides of the board (white-to-black and black-to-white)
+    fn mirror_sides(&mut self) {
         self.counts.swap(0, 1);
     }
 
