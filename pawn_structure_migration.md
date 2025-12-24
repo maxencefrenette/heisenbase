@@ -45,6 +45,7 @@ Make pawn locations explicit in `MaterialKey` so each pawn square is part of the
     - Pawn moving by 2
     - Pawn moving by 1
     - Pawn moving by 1 (and promoting)
+    - En passant is out of scope and should not be implemented.
 - **Downstream components**
   - `PositionIndexer` must pre-place fixed pawns from the bitboards before indexing other pieces.
     - `index_to_position` should set pawns in `Setup` first, then place the remaining pieces.
