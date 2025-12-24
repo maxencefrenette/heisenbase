@@ -2,7 +2,7 @@
 // compression codec, the other (ignored) layers the file format and metadata on top.
 use heisenbase::{
     material_key::MaterialKey,
-    position_map::PositionIndexer,
+    position_indexer::PositionIndexer,
     wdl_file::{read_wdl_file, write_wdl_file},
     wdl_score_range::WdlScoreRange,
     wdl_table::WdlTable,

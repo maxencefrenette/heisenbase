@@ -1,5 +1,5 @@
 use crate::material_key::MaterialKey;
-use crate::position_map::{PositionIndexer, PositionMappingError};
+use crate::position_indexer::{PositionIndexer, PositionMappingError};
 use crate::score::DtzScoreRange;
 use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
@@ -214,7 +214,7 @@ impl TableBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::position_map::PositionIndexer;
+    use crate::position_indexer::PositionIndexer;
     use crate::wdl_file::write_wdl_file;
     use crate::wdl_score_range::WdlScoreRange;
     use crate::wdl_table::WdlTable;

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
+use shakmaty::{Chess, Color, Position, Role, Square};
 
 mod hb_piece;
 

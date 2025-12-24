@@ -1,6 +1,6 @@
 pub mod combinatorics;
 pub mod material_key;
-pub mod position_map;
+pub mod position_indexer;
 pub mod score;
 pub mod table_builder;
 pub mod wdl_file;
