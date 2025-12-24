@@ -4,7 +4,7 @@ use std::fmt;
 use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PieceDescriptor {
+pub enum HbPieceRole {
     King,
     Queen,
     Rook,
@@ -14,46 +14,46 @@ pub enum PieceDescriptor {
     Pawn,
 }
 
-impl PieceDescriptor {
+impl HbPieceRole {
     fn token(self) -> &'static str {
         match self {
-            PieceDescriptor::King => "K",
-            PieceDescriptor::Queen => "Q",
-            PieceDescriptor::Rook => "R",
-            PieceDescriptor::DarkBishop => "Bd",
-            PieceDescriptor::LightBishop => "Bl",
-            PieceDescriptor::Knight => "N",
-            PieceDescriptor::Pawn => "P",
+            HbPieceRole::King => "K",
+            HbPieceRole::Queen => "Q",
+            HbPieceRole::Rook => "R",
+            HbPieceRole::DarkBishop => "Bd",
+            HbPieceRole::LightBishop => "Bl",
+            HbPieceRole::Knight => "N",
+            HbPieceRole::Pawn => "P",
         }
     }
 
     fn from_token(tok: &str) -> Option<Self> {
         match tok {
-            "K" => Some(PieceDescriptor::King),
-            "Q" => Some(PieceDescriptor::Queen),
-            "R" => Some(PieceDescriptor::Rook),
-            "Bd" => Some(PieceDescriptor::DarkBishop),
-            "Bl" => Some(PieceDescriptor::LightBishop),
-            "N" => Some(PieceDescriptor::Knight),
-            "P" => Some(PieceDescriptor::Pawn),
+            "K" => Some(HbPieceRole::King),
+            "Q" => Some(HbPieceRole::Queen),
+            "R" => Some(HbPieceRole::Rook),
+            "Bd" => Some(HbPieceRole::DarkBishop),
+            "Bl" => Some(HbPieceRole::LightBishop),
+            "N" => Some(HbPieceRole::Knight),
+            "P" => Some(HbPieceRole::Pawn),
             _ => None,
         }
     }
 
     pub fn role(self) -> Role {
         match self {
-            PieceDescriptor::King => Role::King,
-            PieceDescriptor::Queen => Role::Queen,
-            PieceDescriptor::Rook => Role::Rook,
-            PieceDescriptor::DarkBishop | PieceDescriptor::LightBishop => Role::Bishop,
-            PieceDescriptor::Knight => Role::Knight,
-            PieceDescriptor::Pawn => Role::Pawn,
+            HbPieceRole::King => Role::King,
+            HbPieceRole::Queen => Role::Queen,
+            HbPieceRole::Rook => Role::Rook,
+            HbPieceRole::DarkBishop | HbPieceRole::LightBishop => Role::Bishop,
+            HbPieceRole::Knight => Role::Knight,
+            HbPieceRole::Pawn => Role::Pawn,
         }
     }
 
     pub fn is_bishop(self) -> bool {
         match self {
-            PieceDescriptor::DarkBishop | PieceDescriptor::LightBishop => true,
+            HbPieceRole::DarkBishop | HbPieceRole::LightBishop => true,
             _ => false,
         }
     }
@@ -61,7 +61,7 @@ impl PieceDescriptor {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HbPiece {
-    pub role: PieceDescriptor,
+    pub role: HbPieceRole,
     pub color: Color,
 }
 
@@ -74,14 +74,14 @@ impl From<HbPiece> for shakmaty::Piece {
     }
 }
 
-pub const PIECES: [PieceDescriptor; 7] = [
-    PieceDescriptor::King,
-    PieceDescriptor::Queen,
-    PieceDescriptor::Rook,
-    PieceDescriptor::DarkBishop,
-    PieceDescriptor::LightBishop,
-    PieceDescriptor::Knight,
-    PieceDescriptor::Pawn,
+pub const PIECES: [HbPieceRole; 7] = [
+    HbPieceRole::King,
+    HbPieceRole::Queen,
+    HbPieceRole::Rook,
+    HbPieceRole::DarkBishop,
+    HbPieceRole::LightBishop,
+    HbPieceRole::Knight,
+    HbPieceRole::Pawn,
 ];
 
 /// Represents a material configuration, e.g. `KQvK`.
@@ -189,7 +189,7 @@ impl MaterialKey {
                     _ => return None,
                 };
 
-                let pd = PieceDescriptor::from_token(token)?;
+                let pd = HbPieceRole::from_token(token)?;
                 out[color_idx][pd as usize] += 1;
             }
 
@@ -203,7 +203,7 @@ impl MaterialKey {
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
-        let pawn_idx = PieceDescriptor::Pawn as usize;
+        let pawn_idx = HbPieceRole::Pawn as usize;
         self.counts
             .iter()
             .map(|side| {
@@ -251,8 +251,8 @@ impl MaterialKey {
     }
 
     fn flip_bishop_colors(&mut self) {
-        let light_idx = PieceDescriptor::LightBishop as usize;
-        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        let light_idx = HbPieceRole::LightBishop as usize;
+        let dark_idx = HbPieceRole::DarkBishop as usize;
         for color_idx in 0..2 {
             let light = self.counts[color_idx][light_idx];
             let dark = self.counts[color_idx][dark_idx];
@@ -263,8 +263,8 @@ impl MaterialKey {
 
     fn swapped_bishop_counts(counts: &[[u8; PIECES.len()]; 2]) -> [[u8; PIECES.len()]; 2] {
         let mut swapped = *counts;
-        let light_idx = PieceDescriptor::LightBishop as usize;
-        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        let light_idx = HbPieceRole::LightBishop as usize;
+        let dark_idx = HbPieceRole::DarkBishop as usize;
         for color_idx in 0..2 {
             swapped[color_idx][light_idx] = counts[color_idx][dark_idx];
             swapped[color_idx][dark_idx] = counts[color_idx][light_idx];
@@ -283,13 +283,13 @@ impl MaterialKey {
     }
 
     pub fn has_pawns(&self) -> bool {
-        let pawn_idx = PieceDescriptor::Pawn as usize;
+        let pawn_idx = HbPieceRole::Pawn as usize;
         self.counts[0][pawn_idx] > 0 || self.counts[1][pawn_idx] > 0
     }
 
     pub fn has_bishops(&self) -> bool {
-        let light_idx = PieceDescriptor::LightBishop as usize;
-        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        let light_idx = HbPieceRole::LightBishop as usize;
+        let dark_idx = HbPieceRole::DarkBishop as usize;
         self.counts[0][light_idx] > 0
             || self.counts[1][light_idx] > 0
             || self.counts[0][dark_idx] > 0
@@ -318,30 +318,30 @@ impl MaterialKey {
             }
         };
 
-        let queen_idx = PieceDescriptor::Queen as usize;
+        let queen_idx = HbPieceRole::Queen as usize;
         if let Some(color) = compare(counts[0][queen_idx], counts[1][queen_idx]) {
             return color;
         }
 
-        let rook_idx = PieceDescriptor::Rook as usize;
+        let rook_idx = HbPieceRole::Rook as usize;
         if let Some(color) = compare(counts[0][rook_idx], counts[1][rook_idx]) {
             return color;
         }
 
-        let light_idx = PieceDescriptor::LightBishop as usize;
-        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        let light_idx = HbPieceRole::LightBishop as usize;
+        let dark_idx = HbPieceRole::DarkBishop as usize;
         let white_bishops = counts[0][light_idx] + counts[0][dark_idx];
         let black_bishops = counts[1][light_idx] + counts[1][dark_idx];
         if let Some(color) = compare(white_bishops, black_bishops) {
             return color;
         }
 
-        let knight_idx = PieceDescriptor::Knight as usize;
+        let knight_idx = HbPieceRole::Knight as usize;
         if let Some(color) = compare(counts[0][knight_idx], counts[1][knight_idx]) {
             return color;
         }
 
-        let pawn_idx = PieceDescriptor::Pawn as usize;
+        let pawn_idx = HbPieceRole::Pawn as usize;
         if let Some(color) = compare(counts[0][pawn_idx], counts[1][pawn_idx]) {
             return color;
         }
@@ -356,7 +356,7 @@ impl MaterialKey {
         for color_idx in 0..2 {
             let opponent = 1 - color_idx;
             for piece_idx in 0..PIECES.len() {
-                if piece_idx == PieceDescriptor::King as usize {
+                if piece_idx == HbPieceRole::King as usize {
                     continue;
                 }
                 if self.counts[opponent][piece_idx] == 0 {
@@ -370,13 +370,13 @@ impl MaterialKey {
 
         // Promotions (with and without capture).
         let promo_targets = [
-            PieceDescriptor::Queen,
-            PieceDescriptor::Rook,
-            PieceDescriptor::LightBishop,
-            PieceDescriptor::DarkBishop,
-            PieceDescriptor::Knight,
+            HbPieceRole::Queen,
+            HbPieceRole::Rook,
+            HbPieceRole::LightBishop,
+            HbPieceRole::DarkBishop,
+            HbPieceRole::Knight,
         ];
-        let pawn_idx = PieceDescriptor::Pawn as usize;
+        let pawn_idx = HbPieceRole::Pawn as usize;
         for color_idx in 0..2 {
             if self.counts[color_idx][pawn_idx] == 0 {
                 continue;
@@ -390,7 +390,7 @@ impl MaterialKey {
                 children.insert(MaterialKey::new(promo_counts));
 
                 for capture_idx in 0..PIECES.len() {
-                    if capture_idx == PieceDescriptor::King as usize {
+                    if capture_idx == HbPieceRole::King as usize {
                         continue;
                     }
                     if self.counts[opponent][capture_idx] == 0 {
@@ -415,18 +415,18 @@ impl MaterialKey {
                     Color::Black => 1,
                 };
                 let piece_idx = match piece.role {
-                    Role::King => PieceDescriptor::King as usize,
-                    Role::Queen => PieceDescriptor::Queen as usize,
-                    Role::Rook => PieceDescriptor::Rook as usize,
+                    Role::King => HbPieceRole::King as usize,
+                    Role::Queen => HbPieceRole::Queen as usize,
+                    Role::Rook => HbPieceRole::Rook as usize,
                     Role::Bishop => {
                         if square.is_light() {
-                            PieceDescriptor::LightBishop as usize
+                            HbPieceRole::LightBishop as usize
                         } else {
-                            PieceDescriptor::DarkBishop as usize
+                            HbPieceRole::DarkBishop as usize
                         }
                     }
-                    Role::Knight => PieceDescriptor::Knight as usize,
-                    Role::Pawn => PieceDescriptor::Pawn as usize,
+                    Role::Knight => HbPieceRole::Knight as usize,
+                    Role::Pawn => HbPieceRole::Pawn as usize,
                 };
                 counts[color_idx][piece_idx] += 1;
             }
@@ -455,16 +455,16 @@ impl fmt::Display for MaterialKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fn write_bishops(f: &mut fmt::Formatter<'_>, light: u8, dark: u8) -> fmt::Result {
             for _ in 0..dark {
-                write!(f, "{}", PieceDescriptor::DarkBishop.token())?;
+                write!(f, "{}", HbPieceRole::DarkBishop.token())?;
             }
             for _ in 0..light {
-                write!(f, "{}", PieceDescriptor::LightBishop.token())?;
+                write!(f, "{}", HbPieceRole::LightBishop.token())?;
             }
             Ok(())
         }
 
-        let light_idx = PieceDescriptor::LightBishop as usize;
-        let dark_idx = PieceDescriptor::DarkBishop as usize;
+        let light_idx = HbPieceRole::LightBishop as usize;
+        let dark_idx = HbPieceRole::DarkBishop as usize;
 
         for color_idx in 0..2 {
             if color_idx == 1 {
@@ -475,16 +475,16 @@ impl fmt::Display for MaterialKey {
             let counts = &self.counts[color_idx];
 
             // Always write the king first.
-            for _ in 0..counts[PieceDescriptor::King as usize] {
-                write!(f, "{}", PieceDescriptor::King.token())?;
+            for _ in 0..counts[HbPieceRole::King as usize] {
+                write!(f, "{}", HbPieceRole::King.token())?;
             }
 
-            for _ in 0..counts[PieceDescriptor::Queen as usize] {
-                write!(f, "{}", PieceDescriptor::Queen.token())?;
+            for _ in 0..counts[HbPieceRole::Queen as usize] {
+                write!(f, "{}", HbPieceRole::Queen.token())?;
             }
 
-            for _ in 0..counts[PieceDescriptor::Rook as usize] {
-                write!(f, "{}", PieceDescriptor::Rook.token())?;
+            for _ in 0..counts[HbPieceRole::Rook as usize] {
+                write!(f, "{}", HbPieceRole::Rook.token())?;
             }
 
             let light = counts[light_idx];
@@ -493,12 +493,12 @@ impl fmt::Display for MaterialKey {
                 write_bishops(f, light, dark)?;
             }
 
-            for _ in 0..counts[PieceDescriptor::Knight as usize] {
-                write!(f, "{}", PieceDescriptor::Knight.token())?;
+            for _ in 0..counts[HbPieceRole::Knight as usize] {
+                write!(f, "{}", HbPieceRole::Knight.token())?;
             }
 
-            for _ in 0..counts[PieceDescriptor::Pawn as usize] {
-                write!(f, "{}", PieceDescriptor::Pawn.token())?;
+            for _ in 0..counts[HbPieceRole::Pawn as usize] {
+                write!(f, "{}", HbPieceRole::Pawn.token())?;
             }
         }
 

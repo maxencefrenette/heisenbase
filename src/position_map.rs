@@ -1,4 +1,4 @@
-use crate::material_key::{MaterialError, MaterialKey, PieceDescriptor};
+use crate::material_key::{HbPieceRole, MaterialError, MaterialKey};
 use shakmaty::{CastlingMode, Chess, Color, FromSetup, Position, Setup, Square};
 
 #[derive(Clone)]
@@ -12,7 +12,7 @@ impl PositionIndexer {
         let mut total_positions = 2;
         for piece in material_key.pieces() {
             match piece.role {
-                PieceDescriptor::LightBishop | PieceDescriptor::DarkBishop => {
+                HbPieceRole::LightBishop | HbPieceRole::DarkBishop => {
                     total_positions *= 32;
                 }
                 _ => {
@@ -60,7 +60,7 @@ impl PositionIndexer {
 
         for piece in self.material_key.pieces() {
             let radix = match piece.role {
-                PieceDescriptor::LightBishop | PieceDescriptor::DarkBishop => 32,
+                HbPieceRole::LightBishop | HbPieceRole::DarkBishop => 32,
                 _ => 64,
             };
 
@@ -68,8 +68,8 @@ impl PositionIndexer {
             remaining /= radix;
 
             let square_index = match piece.role {
-                PieceDescriptor::LightBishop => position * 2 + 1,
-                PieceDescriptor::DarkBishop => position * 2,
+                HbPieceRole::LightBishop => position * 2 + 1,
+                HbPieceRole::DarkBishop => position * 2,
                 _ => position,
             };
 
@@ -107,7 +107,7 @@ impl PositionIndexer {
 
         for piece in self.material_key.pieces() {
             let radix = match piece.role {
-                PieceDescriptor::LightBishop | PieceDescriptor::DarkBishop => 32,
+                HbPieceRole::LightBishop | HbPieceRole::DarkBishop => 32,
                 _ => 64,
             };
 
@@ -117,8 +117,8 @@ impl PositionIndexer {
             let square_index = square.to_usize();
 
             let position = match piece.role {
-                PieceDescriptor::LightBishop => (square_index - 1) / 2,
-                PieceDescriptor::DarkBishop => square_index / 2,
+                HbPieceRole::LightBishop => (square_index - 1) / 2,
+                HbPieceRole::DarkBishop => square_index / 2,
                 _ => square_index,
             };
 
