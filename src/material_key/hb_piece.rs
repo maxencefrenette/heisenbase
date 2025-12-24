@@ -12,7 +12,17 @@ pub enum HbPieceRole {
 }
 
 impl HbPieceRole {
-    pub(crate) fn token(self) -> &'static str {
+    pub const ALL: [HbPieceRole; 7] = [
+        HbPieceRole::King,
+        HbPieceRole::Queen,
+        HbPieceRole::Rook,
+        HbPieceRole::DarkBishop,
+        HbPieceRole::LightBishop,
+        HbPieceRole::Knight,
+        HbPieceRole::Pawn,
+    ];
+
+    pub fn token(self) -> &'static str {
         match self {
             HbPieceRole::King => "K",
             HbPieceRole::Queen => "Q",
@@ -24,7 +34,7 @@ impl HbPieceRole {
         }
     }
 
-    pub(crate) fn from_token(tok: &str) -> Option<Self> {
+    pub fn from_token(tok: &str) -> Option<Self> {
         match tok {
             "K" => Some(HbPieceRole::King),
             "Q" => Some(HbPieceRole::Queen),
@@ -74,13 +84,3 @@ impl From<HbPiece> for shakmaty::Piece {
         }
     }
 }
-
-pub const PIECES: [HbPieceRole; 7] = [
-    HbPieceRole::King,
-    HbPieceRole::Queen,
-    HbPieceRole::Rook,
-    HbPieceRole::DarkBishop,
-    HbPieceRole::LightBishop,
-    HbPieceRole::Knight,
-    HbPieceRole::Pawn,
-];

@@ -5,7 +5,7 @@ use shakmaty::{Chess, Color, Position, PositionErrorKinds, Role, Square};
 
 mod hb_piece;
 
-pub use hb_piece::{HbPiece, HbPieceRole, PIECES};
+pub use hb_piece::{HbPiece, HbPieceRole};
 
 /// Represents a material configuration, e.g. `KQvK`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -13,7 +13,7 @@ pub struct MaterialKey {
     /// Piece counts indexed by color then piece descriptor.
     /// By convention the strong side is always first and it is encoded as white
     /// whenever we convert to a position.
-    pub counts: [[u8; PIECES.len()]; 2],
+    pub counts: [[u8; HbPieceRole::ALL.len()]; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,7 +25,7 @@ pub enum MaterialError {
 }
 
 impl MaterialKey {
-    pub(crate) fn new(counts: [[u8; PIECES.len()]; 2]) -> Self {
+    pub(crate) fn new(counts: [[u8; HbPieceRole::ALL.len()]; 2]) -> Self {
         let mut key = Self { counts };
         key.canonicalize();
         key
@@ -61,9 +61,13 @@ impl MaterialKey {
             return None;
         }
 
-        let mut counts = [[0u8; PIECES.len()]; 2];
+        let mut counts = [[0u8; HbPieceRole::ALL.len()]; 2];
 
-        fn push_pieces(out: &mut [[u8; PIECES.len()]; 2], s: &str, color: Color) -> Option<()> {
+        fn push_pieces(
+            out: &mut [[u8; HbPieceRole::ALL.len()]; 2],
+            s: &str,
+            color: Color,
+        ) -> Option<()> {
             let color_idx = match color {
                 Color::White => 0,
                 Color::Black => 1,
@@ -184,7 +188,9 @@ impl MaterialKey {
         }
     }
 
-    fn swapped_bishop_counts(counts: &[[u8; PIECES.len()]; 2]) -> [[u8; PIECES.len()]; 2] {
+    fn swapped_bishop_counts(
+        counts: &[[u8; HbPieceRole::ALL.len()]; 2],
+    ) -> [[u8; HbPieceRole::ALL.len()]; 2] {
         let mut swapped = *counts;
         let light_idx = HbPieceRole::LightBishop as usize;
         let dark_idx = HbPieceRole::DarkBishop as usize;
@@ -195,11 +201,13 @@ impl MaterialKey {
         swapped
     }
 
-    fn flatten_counts(counts: &[[u8; PIECES.len()]; 2]) -> [u8; PIECES.len() * 2] {
-        let mut flat = [0u8; PIECES.len() * 2];
+    fn flatten_counts(
+        counts: &[[u8; HbPieceRole::ALL.len()]; 2],
+    ) -> [u8; HbPieceRole::ALL.len() * 2] {
+        let mut flat = [0u8; HbPieceRole::ALL.len() * 2];
         for color_idx in 0..2 {
-            for piece_idx in 0..PIECES.len() {
-                flat[color_idx * PIECES.len() + piece_idx] = counts[color_idx][piece_idx];
+            for piece_idx in 0..HbPieceRole::ALL.len() {
+                flat[color_idx * HbPieceRole::ALL.len() + piece_idx] = counts[color_idx][piece_idx];
             }
         }
         flat
@@ -230,7 +238,7 @@ impl MaterialKey {
     /// The first factor is the total piece count.
     /// Then, it's which side has the strongest piece.
     /// Finally, In case of a tie, White is considered stronger.
-    fn strong_color_from_counts(counts: &[[u8; PIECES.len()]; 2]) -> Color {
+    fn strong_color_from_counts(counts: &[[u8; HbPieceRole::ALL.len()]; 2]) -> Color {
         let compare = |white: u8, black: u8| -> Option<Color> {
             if white > black {
                 Some(Color::White)
@@ -278,7 +286,7 @@ impl MaterialKey {
         // Captures: any move that removes an opponent piece (except the king).
         for color_idx in 0..2 {
             let opponent = 1 - color_idx;
-            for piece_idx in 0..PIECES.len() {
+            for piece_idx in 0..HbPieceRole::ALL.len() {
                 if piece_idx == HbPieceRole::King as usize {
                     continue;
                 }
@@ -312,7 +320,7 @@ impl MaterialKey {
                 promo_counts[color_idx][target_idx] += 1;
                 children.insert(MaterialKey::new(promo_counts));
 
-                for capture_idx in 0..PIECES.len() {
+                for capture_idx in 0..HbPieceRole::ALL.len() {
                     if capture_idx == HbPieceRole::King as usize {
                         continue;
                     }
@@ -330,7 +338,7 @@ impl MaterialKey {
     }
 
     pub fn from_position(position: &Chess) -> Option<Self> {
-        let mut counts = [[0u8; PIECES.len()]; 2];
+        let mut counts = [[0u8; HbPieceRole::ALL.len()]; 2];
         for square in Square::ALL {
             if let Some(piece) = position.board().piece_at(square) {
                 let color_idx = match piece.color {
@@ -366,7 +374,7 @@ impl MaterialKey {
                 _ => unreachable!(),
             };
 
-            PIECES.iter().copied().flat_map(move |piece| {
+            HbPieceRole::ALL.iter().copied().flat_map(move |piece| {
                 (0..self.counts[color_index][piece as usize])
                     .map(move |_| HbPiece { role: piece, color })
             })
