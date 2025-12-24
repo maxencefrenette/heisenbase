@@ -1,5 +1,5 @@
-use crate::material_key::{MaterialError, MaterialKey};
-use crate::position_map::PositionIndexer;
+use crate::material_key::MaterialKey;
+use crate::position_map::{PositionIndexer, PositionMappingError};
 use crate::score::DtzScoreRange;
 use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
@@ -125,14 +125,15 @@ impl TableBuilder {
 
         let position = match self.position_indexer.index_to_position(pos_index) {
             Ok(p) => p,
-            Err(MaterialError::InvalidPosition(_)) | Err(MaterialError::TwoPiecesOnSameSquare) => {
+            Err(PositionMappingError::InvalidPosition(_))
+            | Err(PositionMappingError::TwoPiecesOnSameSquare) => {
                 return DtzScoreRange::illegal();
             }
-            Err(MaterialError::IndexOutOfBounds) => {
+            Err(PositionMappingError::IndexOutOfBounds) => {
                 debug_assert!(false, "index {} unexpectedly out of bounds", pos_index);
                 return old_score;
             }
-            Err(MaterialError::MismatchedMaterial) => {
+            Err(PositionMappingError::MismatchedMaterial) => {
                 debug_assert!(false, "index {} has mismatched material", pos_index);
                 return old_score;
             }

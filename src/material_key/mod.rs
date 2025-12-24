@@ -16,14 +16,6 @@ pub struct MaterialKey {
     pub counts: [[u8; HbPieceRole::ALL.len()]; 2],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MaterialError {
-    MismatchedMaterial,
-    IndexOutOfBounds,
-    TwoPiecesOnSameSquare,
-    InvalidPosition(PositionErrorKinds),
-}
-
 impl MaterialKey {
     pub(crate) fn new(counts: [[u8; HbPieceRole::ALL.len()]; 2]) -> Self {
         let mut key = Self { counts };

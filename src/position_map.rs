@@ -1,5 +1,7 @@
-use crate::material_key::{HbPieceRole, MaterialError, MaterialKey};
-use shakmaty::{CastlingMode, Chess, Color, FromSetup, Position, Setup, Square};
+use crate::material_key::{HbPieceRole, MaterialKey};
+use shakmaty::{
+    CastlingMode, Chess, Color, FromSetup, Position, PositionErrorKinds, Setup, Square,
+};
 
 #[derive(Clone)]
 pub struct PositionIndexer {
@@ -43,9 +45,9 @@ impl PositionIndexer {
     ///
     /// Indices greater than or equal to `total_positions()` return
     /// [`Err(MaterialError::IndexOutOfBounds)`].
-    pub fn index_to_position(&self, index: usize) -> Result<Chess, MaterialError> {
+    pub fn index_to_position(&self, index: usize) -> Result<Chess, PositionMappingError> {
         if index >= self.total_positions {
-            return Err(MaterialError::IndexOutOfBounds);
+            return Err(PositionMappingError::IndexOutOfBounds);
         }
 
         let turn = match index % 2 {
@@ -78,7 +80,7 @@ impl PositionIndexer {
                 .piece_at(Square::new(square_index as u32))
                 .is_some()
             {
-                return Err(MaterialError::TwoPiecesOnSameSquare);
+                return Err(PositionMappingError::TwoPiecesOnSameSquare);
             }
 
             setup
@@ -89,10 +91,10 @@ impl PositionIndexer {
         debug_assert!(remaining == 0);
 
         Chess::from_setup(setup, CastlingMode::Standard)
-            .map_err(|e| MaterialError::InvalidPosition(e.kinds()))
+            .map_err(|e| PositionMappingError::InvalidPosition(e.kinds()))
     }
 
-    pub fn position_to_index(&self, position: &Chess) -> Result<usize, MaterialError> {
+    pub fn position_to_index(&self, position: &Chess) -> Result<usize, PositionMappingError> {
         let mut index = 0;
         let mut multiplier = 1;
 
@@ -112,7 +114,9 @@ impl PositionIndexer {
             };
 
             let bitboard = board.by_piece(piece.into());
-            let square = bitboard.first().ok_or(MaterialError::MismatchedMaterial)?;
+            let square = bitboard
+                .first()
+                .ok_or(PositionMappingError::MismatchedMaterial)?;
             board.discard_piece_at(square);
             let square_index = square.to_usize();
 
@@ -131,6 +135,18 @@ impl PositionIndexer {
 
         Ok(index)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PositionMappingError {
+    /// The material key does not match the position.
+    MismatchedMaterial,
+    /// The index is out of bounds.
+    IndexOutOfBounds,
+    /// The index corresponds to a position where two pieces are on the same square.
+    TwoPiecesOnSameSquare,
+    /// The resulting position fits on the board, but is invalid due to some rule of chess.
+    InvalidPosition(PositionErrorKinds),
 }
 
 #[cfg(test)]
@@ -219,7 +235,7 @@ mod tests {
         let index = indexer.total_positions();
         assert!(matches!(
             indexer.index_to_position(index),
-            Err(MaterialError::IndexOutOfBounds)
+            Err(PositionMappingError::IndexOutOfBounds)
         ));
     }
 
@@ -261,7 +277,7 @@ mod tests {
         let pos = Chess::from_setup(setup, CastlingMode::Standard).unwrap();
         assert!(matches!(
             indexer.position_to_index(&pos),
-            Err(MaterialError::MismatchedMaterial)
+            Err(PositionMappingError::MismatchedMaterial)
         ));
     }
 }
