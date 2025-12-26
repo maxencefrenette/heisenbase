@@ -11,6 +11,7 @@ pgn-reader = "0.28.0"
 polars = { version = "0.42.0", features = ["parquet"] }
 indicatif = { version = "0.17", features = ["rayon"] }
 rayon = "1.11.0"
+insta = "1.45.0"
 
 [dev-dependencies]
 rand = "0.8"

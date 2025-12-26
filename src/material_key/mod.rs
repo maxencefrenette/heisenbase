@@ -4,6 +4,7 @@ use std::fmt;
 use shakmaty::{Chess, Color, Position, Role, Square};
 
 mod hb_piece;
+mod pawn_structure;
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
