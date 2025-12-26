@@ -149,14 +149,54 @@ impl PawnStructure {
     /// Returns the pawn structures that can be reached from this pawn structure by promoting a pawn.
     #[allow(dead_code)]
     pub fn child_pawn_structures_with_promotions(&self) -> Vec<PawnStructure> {
-        unimplemented!()
+        fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
+            let can_promote_forward = Bitboard::from_rank(Rank::Seventh) & ps.pawn_bitboards[0];
+
+            can_promote_forward.into_iter().map(|square| {
+                let mut child = ps.clone();
+                child.pawn_bitboards[0].discard(square);
+                child
+            })
+        }
+
+        one_sided(&self)
+            .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
+            .collect()
     }
 
     /// Returns the pawn structures that can be reached from this pawn structure by capturing a piece which
     /// results in a promotion.
     #[allow(dead_code)]
     pub fn child_pawn_structures_with_piece_captures_and_promotions(&self) -> Vec<PawnStructure> {
-        unimplemented!()
+        fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
+            let can_capture_left = Bitboard::from_rank(Rank::Seventh)
+                .without(Bitboard::from_file(File::A))
+                & ps.pawn_bitboards[0];
+            let can_capture_right = Bitboard::from_rank(Rank::Seventh)
+                .without(Bitboard::from_file(File::H))
+                & ps.pawn_bitboards[0];
+
+            can_capture_right
+                .into_iter()
+                .map(|square| {
+                    let mut child = ps.clone();
+                    let target = square.offset(9).unwrap();
+                    child.pawn_bitboards[0].discard(square);
+                    child.pawn_bitboards[1].discard(target);
+                    child
+                })
+                .chain(can_capture_left.into_iter().map(|square| {
+                    let mut child = ps.clone();
+                    let target = square.offset(7).unwrap();
+                    child.pawn_bitboards[0].discard(square);
+                    child.pawn_bitboards[1].discard(target);
+                    child
+                }))
+        }
+
+        one_sided(&self)
+            .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
+            .collect()
     }
 }
 
@@ -507,6 +547,116 @@ mod tests {
             . . . . . . . .
             . . . . . p . .
             . . p . P . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+        ]
+        "
+        );
+    }
+
+    #[test]
+    fn child_pawn_structures_with_promotions_removes_promoting_pawn() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::A7),
+            Bitboard::from_square(Square::H2),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        P . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . p
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_with_promotions()
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . p
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            P . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+        ]
+        "
+        );
+    }
+
+    #[test]
+    fn child_pawn_structures_with_piece_captures_and_promotions_removes_captured_pawn() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::B7),
+            Bitboard::from_square(Square::G2),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        . P . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . p .
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_with_piece_captures_and_promotions()
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . p .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . p .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . P . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . P . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
