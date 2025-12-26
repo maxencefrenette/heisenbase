@@ -57,6 +57,18 @@ impl PawnStructure {
                 & ps.pawn_bitboards[0]
                 & !ps.pawn_bitboards[1].shift(-8)
                 & !ps.pawn_bitboards[1].shift(-16);
+            let can_capture_left = (Bitboard::FULL
+                .without(Bitboard::BACKRANKS)
+                .without(Bitboard::from_rank(Rank::Seventh)))
+            .without(Bitboard::from_file(File::A))
+                & ps.pawn_bitboards[0]
+                & ps.pawn_bitboards[1].shift(-7);
+            let can_capture_right = (Bitboard::FULL
+                .without(Bitboard::BACKRANKS)
+                .without(Bitboard::from_rank(Rank::Seventh)))
+            .without(Bitboard::from_file(File::H))
+                & ps.pawn_bitboards[0]
+                & ps.pawn_bitboards[1].shift(-9);
 
             can_be_moved_one_square
                 .into_iter()
@@ -70,6 +82,22 @@ impl PawnStructure {
                     let mut child = ps.clone();
                     child.pawn_bitboards[0].discard(square);
                     child.pawn_bitboards[0].add(square.offset(16).unwrap());
+                    child
+                }))
+                .chain(can_capture_right.into_iter().map(|square| {
+                    let mut child = ps.clone();
+                    let target = square.offset(9).unwrap();
+                    child.pawn_bitboards[0].discard(square);
+                    child.pawn_bitboards[0].add(target);
+                    child.pawn_bitboards[1].discard(target);
+                    child
+                }))
+                .chain(can_capture_left.into_iter().map(|square| {
+                    let mut child = ps.clone();
+                    let target = square.offset(7).unwrap();
+                    child.pawn_bitboards[0].discard(square);
+                    child.pawn_bitboards[0].add(target);
+                    child.pawn_bitboards[1].discard(target);
                     child
                 }))
         }
@@ -282,6 +310,70 @@ mod tests {
             . . . . . . . .
             . . . . p . . .
             . . . . P . . .
+            . . . . . . . .
+            ,
+        ]
+        "
+        );
+    }
+
+    #[test]
+    fn child_pawn_structures_includes_pawn_captures() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::E4),
+            Bitboard::from_square(Square::D5),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . p . . . .
+        . . . . P . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_no_piece_changes()
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . p P . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . P . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . p P . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . . . . .
+            . . . . . . . .
             . . . . . . . .
             ,
         ]
