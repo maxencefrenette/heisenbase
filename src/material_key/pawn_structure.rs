@@ -185,4 +185,100 @@ mod tests {
         ]
         ");
     }
+
+    #[test]
+    fn child_pawn_structures_blocked_by_opponent_generates_no_moves() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::E2),
+            Bitboard::from_square(Square::E3),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . p . . .
+        . . . . P . . .
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_no_piece_changes()
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"[]"
+        );
+    }
+
+    #[test]
+    fn child_pawn_structures_blocked_double_step_still_allows_single_step() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::E2),
+            Bitboard::from_square(Square::E4),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . p . . .
+        . . . . . . . .
+        . . . . P . . .
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_no_piece_changes()
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . P . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
+        ]
+        "
+        );
+    }
+
+    #[test]
+    fn child_pawn_structures_seventh_rank_generates_no_moves() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::A7),
+            Bitboard::from_square(Square::H2),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        P . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . p
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_no_piece_changes()
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"[]"
+        );
+    }
 }
