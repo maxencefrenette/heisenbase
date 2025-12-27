@@ -1,13 +1,12 @@
-#[cfg(test)]
-use shakmaty::Board;
-use shakmaty::{Bitboard, ByColor, File, Rank};
+use std::cmp::Ordering;
+
+use shakmaty::{Bitboard, Board, ByColor, File, Rank};
 
 /// Represents the pawn structure of a position, i.e. the pawns on the board.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct PawnStructure(ByColor<Bitboard>);
+pub struct PawnStructure(pub ByColor<Bitboard>);
 
 impl PawnStructure {
-    #[cfg(test)]
     pub fn new(white_pawns: Bitboard, black_pawns: Bitboard) -> Self {
         Self(ByColor {
             white: white_pawns,
@@ -15,9 +14,19 @@ impl PawnStructure {
         })
     }
 
-    #[cfg(test)]
+    pub fn from_board(board: &Board) -> Self {
+        Self(ByColor {
+            white: board.pawns() & board.white(),
+            black: board.pawns() & board.black(),
+        })
+    }
+
     pub fn occupied(&self) -> Bitboard {
         self.0.white | self.0.black
+    }
+
+    pub fn pawn_count(&self) -> u32 {
+        self.occupied().count() as u32
     }
 
     pub fn flip_sides(&self) -> Self {
@@ -194,6 +203,22 @@ impl PawnStructure {
         one_sided(&self)
             .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
             .collect()
+    }
+}
+
+impl PartialOrd for PawnStructure {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PawnStructure {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let white_cmp = self.0.white.cmp(&other.0.white);
+        if white_cmp != Ordering::Equal {
+            return white_cmp;
+        }
+        self.0.black.cmp(&other.0.black)
     }
 }
 

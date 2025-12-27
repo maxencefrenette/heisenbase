@@ -1,10 +1,9 @@
-use std::collections::BTreeSet;
-use std::fmt;
-
-use shakmaty::{Chess, Color, Position, Role, Square};
-
 mod hb_piece;
 mod pawn_structure;
+
+use crate::material_key::pawn_structure::PawnStructure;
+use shakmaty::{Bitboard, Chess, Color, Position, Role, Square};
+use std::fmt;
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -15,11 +14,12 @@ pub struct MaterialKey {
     /// By convention the strong side is always first and it is encoded as white
     /// whenever we convert to a position.
     pub counts: [[u8; HbPieceRole::ALL.len()]; 2],
+    pub pawns: PawnStructure,
 }
 
 impl MaterialKey {
-    pub(crate) fn new(counts: [[u8; HbPieceRole::ALL.len()]; 2]) -> Self {
-        let mut key = Self { counts };
+    pub fn new(counts: [[u8; HbPieceRole::ALL.len()]; 2], pawns: PawnStructure) -> Self {
+        let mut key = Self { counts, pawns };
         key.canonicalize();
         key
     }
@@ -32,10 +32,15 @@ impl MaterialKey {
     /// sides.
     ///
     /// # Piece tokens and colors
-    /// Supported tokens are `K`, `Q`, `R`, `Bl`, `Bd`, `N` and `P` for king,
-    /// queen, rook, light-squared bishop, dark-squared bishop, knight and pawn
-    /// respectively. Pieces appearing before the separator are interpreted as
-    /// white, while those after it are treated as black.
+    /// Supported tokens are `K`, `Q`, `R`, `Bl`, `Bd` and `N` for king,
+    /// queen, rook, light-squared bishop, dark-squared bishop and knight respectively.
+    /// Pieces appearing before the separator are interpreted as white, while those after
+    /// it are treated as black.
+    ///
+    /// # Pawn tokens
+    /// Pawn squares are a sequence of lowercase file/rank pairs (`a1`..`h8`).
+    /// Pieces appearing before the separator are interpreted as white, while those after
+    /// it are treated as black.
     ///
     /// # Use cases
     /// This is primarily useful for tests and simple user interfaces that need
@@ -55,9 +60,11 @@ impl MaterialKey {
         }
 
         let mut counts = [[0u8; HbPieceRole::ALL.len()]; 2];
+        let mut pawn_bitboards = [Bitboard::EMPTY, Bitboard::EMPTY];
 
         fn push_pieces(
             out: &mut [[u8; HbPieceRole::ALL.len()]; 2],
+            pawns: &mut [Bitboard; 2],
             s: &str,
             color: Color,
         ) -> Option<()> {
@@ -102,9 +109,18 @@ impl MaterialKey {
                         i += 1;
                         "N"
                     }
-                    'P' => {
-                        i += 1;
-                        "P"
+                    'a'..='h' => {
+                        if i + 1 >= bytes.len() {
+                            return None;
+                        }
+                        let square = Square::from_ascii(&bytes[i..i + 2]).ok()?;
+                        let occupied = pawns[0] | pawns[1];
+                        if occupied.contains(square) {
+                            return None;
+                        }
+                        pawns[color_idx].add(square);
+                        i += 2;
+                        continue;
                     }
                     _ => return None,
                 };
@@ -116,31 +132,27 @@ impl MaterialKey {
             Some(())
         }
 
-        push_pieces(&mut counts, white, Color::White)?;
-        push_pieces(&mut counts, black, Color::Black)?;
+        push_pieces(&mut counts, &mut pawn_bitboards, white, Color::White)?;
+        push_pieces(&mut counts, &mut pawn_bitboards, black, Color::Black)?;
 
-        Some(Self::new(counts))
+        let pawns = PawnStructure::new(pawn_bitboards[0], pawn_bitboards[1]);
+
+        Some(Self::new(counts, pawns))
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
-        let pawn_idx = HbPieceRole::Pawn as usize;
         self.counts
             .iter()
-            .map(|side| {
-                side.iter()
-                    .enumerate()
-                    .filter(|(idx, _)| *idx != pawn_idx)
-                    .map(|(_, &count)| count as u32)
-                    .sum::<u32>()
-            })
-            .sum()
+            .map(|side| side.iter().sum::<u8>())
+            .sum::<u8>() as u32
     }
 
     pub fn total_piece_count(&self) -> u32 {
         self.counts
             .iter()
-            .map(|side| side.iter().map(|&count| count as u32).sum::<u32>())
-            .sum()
+            .map(|side| side.iter().sum::<u8>())
+            .sum::<u8>() as u32
+            + self.pawns.occupied().count() as u32
     }
 
     fn canonicalize(&mut self) {
@@ -209,8 +221,7 @@ impl MaterialKey {
     }
 
     pub fn has_pawns(&self) -> bool {
-        let pawn_idx = HbPieceRole::Pawn as usize;
-        self.counts[0][pawn_idx] > 0 || self.counts[1][pawn_idx] > 0
+        self.pawns.occupied().any()
     }
 
     pub fn has_bishops(&self) -> bool {
@@ -268,16 +279,13 @@ impl MaterialKey {
             return color;
         }
 
-        let pawn_idx = HbPieceRole::Pawn as usize;
-        if let Some(color) = compare(counts[0][pawn_idx], counts[1][pawn_idx]) {
-            return color;
-        }
+        // TODO: do we need to compare pawn counts here?
 
         Color::White
     }
 
     pub fn child_material_keys(&self) -> Vec<MaterialKey> {
-        let mut children = BTreeSet::new();
+        let mut children = Vec::new();
 
         // Captures: any move that removes an opponent piece (except the king).
         for color_idx in 0..2 {
@@ -291,52 +299,25 @@ impl MaterialKey {
                 }
                 let mut counts = self.counts;
                 counts[opponent][piece_idx] -= 1;
-                children.insert(MaterialKey::new(counts));
+                // TODO: handle pawn movements
+                children.push(MaterialKey::new(counts, self.pawns.clone()));
             }
         }
 
         // Promotions (with and without capture).
-        let promo_targets = [
-            HbPieceRole::Queen,
-            HbPieceRole::Rook,
-            HbPieceRole::LightBishop,
-            HbPieceRole::DarkBishop,
-            HbPieceRole::Knight,
-        ];
-        let pawn_idx = HbPieceRole::Pawn as usize;
-        for color_idx in 0..2 {
-            if self.counts[color_idx][pawn_idx] == 0 {
-                continue;
-            }
-            let opponent = 1 - color_idx;
-            for target in promo_targets {
-                let target_idx = target as usize;
-                let mut promo_counts = self.counts;
-                promo_counts[color_idx][pawn_idx] -= 1;
-                promo_counts[color_idx][target_idx] += 1;
-                children.insert(MaterialKey::new(promo_counts));
+        // TODO: handle pawn promotions
 
-                for capture_idx in 0..HbPieceRole::ALL.len() {
-                    if capture_idx == HbPieceRole::King as usize {
-                        continue;
-                    }
-                    if self.counts[opponent][capture_idx] == 0 {
-                        continue;
-                    }
-                    let mut capture_counts = promo_counts;
-                    capture_counts[opponent][capture_idx] -= 1;
-                    children.insert(MaterialKey::new(capture_counts));
-                }
-            }
-        }
-
-        children.into_iter().collect()
+        children
     }
 
     pub fn from_position(position: &Chess) -> Option<Self> {
         let mut counts = [[0u8; HbPieceRole::ALL.len()]; 2];
         for square in Square::ALL {
             if let Some(piece) = position.board().piece_at(square) {
+                if piece.role == Role::Pawn {
+                    continue;
+                }
+
                 let color_idx = match piece.color {
                     Color::White => 0,
                     Color::Black => 1,
@@ -353,13 +334,16 @@ impl MaterialKey {
                         }
                     }
                     Role::Knight => HbPieceRole::Knight as usize,
-                    Role::Pawn => HbPieceRole::Pawn as usize,
+                    Role::Pawn => unreachable!(),
                 };
                 counts[color_idx][piece_idx] += 1;
             }
         }
 
-        Some(MaterialKey::new(counts))
+        Some(MaterialKey::new(
+            counts,
+            PawnStructure::from_board(position.board()),
+        ))
     }
 
     pub fn pieces(&self) -> impl Iterator<Item = HbPiece> {
@@ -394,6 +378,12 @@ impl fmt::Display for MaterialKey {
         let dark_idx = HbPieceRole::DarkBishop as usize;
 
         for color_idx in 0..2 {
+            let color = match color_idx {
+                0 => Color::White,
+                1 => Color::Black,
+                _ => unreachable!(),
+            };
+
             if color_idx == 1 {
                 write!(f, "v")?;
             }
@@ -424,8 +414,8 @@ impl fmt::Display for MaterialKey {
                 write!(f, "{}", HbPieceRole::Knight.token())?;
             }
 
-            for _ in 0..counts[HbPieceRole::Pawn as usize] {
-                write!(f, "{}", HbPieceRole::Pawn.token())?;
+            for square in self.pawns.0[color] {
+                write!(f, "{}", square.to_string())?;
             }
         }
 
@@ -436,8 +426,8 @@ impl fmt::Display for MaterialKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use insta::assert_debug_snapshot;
     use shakmaty::{CastlingMode, fen::Fen};
-    use std::collections::BTreeSet;
 
     fn material_key(s: &str) -> String {
         MaterialKey::from_string(s).unwrap().to_string()
@@ -474,18 +464,25 @@ mod tests {
     }
 
     #[test]
-    fn child_keys_for_kpvk() {
-        let key = MaterialKey::from_string("KPvK").unwrap();
-        let children: BTreeSet<String> = key
+    fn parses_kd2vkh7() {
+        let key = MaterialKey::from_string("Kd2vKh7").unwrap();
+        assert_eq!(key.to_string(), "Kd2vKh7");
+    }
+
+    #[test]
+    fn child_material_keys_for_ke4vkn() {
+        let key = MaterialKey::from_string("Ke4vKN").unwrap();
+        let children = key
             .child_material_keys()
             .into_iter()
             .map(|k| k.to_string())
-            .collect();
-        let expected: BTreeSet<String> = ["KvK", "KQvK", "KRvK", "KBdvK", "KNvK"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        assert_eq!(children, expected);
+            .collect::<Vec<String>>();
+
+        assert_debug_snapshot!(children, @r#"
+        [
+            "Ke4vK",
+        ]
+        "#);
     }
 
     #[test]
@@ -496,6 +493,6 @@ mod tests {
             .into_position(CastlingMode::Standard)
             .unwrap();
         let key = MaterialKey::from_position(&position).unwrap();
-        assert_eq!(key.to_string(), "KPvK");
+        assert_eq!(key.to_string(), "Kd2vK");
     }
 }

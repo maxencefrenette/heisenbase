@@ -8,18 +8,16 @@ pub enum HbPieceRole {
     LightBishop,
     DarkBishop,
     Knight,
-    Pawn,
 }
 
 impl HbPieceRole {
-    pub const ALL: [HbPieceRole; 7] = [
+    pub const ALL: [HbPieceRole; 6] = [
         HbPieceRole::King,
         HbPieceRole::Queen,
         HbPieceRole::Rook,
         HbPieceRole::DarkBishop,
         HbPieceRole::LightBishop,
         HbPieceRole::Knight,
-        HbPieceRole::Pawn,
     ];
 
     pub fn token(self) -> &'static str {
@@ -30,7 +28,6 @@ impl HbPieceRole {
             HbPieceRole::DarkBishop => "Bd",
             HbPieceRole::LightBishop => "Bl",
             HbPieceRole::Knight => "N",
-            HbPieceRole::Pawn => "P",
         }
     }
 
@@ -42,7 +39,6 @@ impl HbPieceRole {
             "Bd" => Some(HbPieceRole::DarkBishop),
             "Bl" => Some(HbPieceRole::LightBishop),
             "N" => Some(HbPieceRole::Knight),
-            "P" => Some(HbPieceRole::Pawn),
             _ => None,
         }
     }
@@ -54,7 +50,6 @@ impl HbPieceRole {
             HbPieceRole::Rook => Role::Rook,
             HbPieceRole::DarkBishop | HbPieceRole::LightBishop => Role::Bishop,
             HbPieceRole::Knight => Role::Knight,
-            HbPieceRole::Pawn => Role::Pawn,
         }
     }
 
