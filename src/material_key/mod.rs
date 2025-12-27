@@ -2,8 +2,9 @@ mod hb_piece;
 mod pawn_structure;
 
 use crate::material_key::pawn_structure::PawnStructure;
+use itertools::iproduct;
 use shakmaty::{Bitboard, Chess, Color, Position, Role, Square};
-use std::{cmp::Ordering, fmt};
+use std::{cmp::Ordering, fmt, iter::once};
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -276,25 +277,84 @@ impl MaterialKey {
     pub fn child_material_keys(&self) -> Vec<MaterialKey> {
         let mut children = Vec::new();
 
-        // Captures: any move that removes an opponent piece (except the king).
-        for color_idx in 0..2 {
-            let opponent = 1 - color_idx;
-            for piece_idx in 0..HbPieceRole::ALL.len() {
-                if piece_idx == HbPieceRole::King as usize {
-                    continue;
-                }
-                if self.counts[opponent][piece_idx] == 0 {
-                    continue;
-                }
-                let mut counts = self.counts;
-                counts[opponent][piece_idx] -= 1;
-                // TODO: handle pawn movements
-                children.push(MaterialKey::new(counts, self.pawns.clone()));
-            }
-        }
+        // Simple pawn moves
+        children.extend(
+            self.pawns
+                .child_pawn_structures_no_piece_changes()
+                .into_iter()
+                .map(|ps| MaterialKey::new(self.counts, ps)),
+        );
 
-        // Promotions (with and without capture).
-        // TODO: handle pawn promotions
+        // Captures: any move that removes an opponent piece (except the king).
+        for color in [Color::White, Color::Black] {
+            let opponent = color.other();
+            let color_idx = match color {
+                Color::White => 0,
+                Color::Black => 1,
+            };
+            let opponent_idx = match opponent {
+                Color::White => 0,
+                Color::Black => 1,
+            };
+
+            // Piece captures
+            children.extend(
+                iproduct!(
+                    once(self.pawns.clone())
+                        .chain(self.pawns.child_pawn_structures_with_piece_captures(color)),
+                    HbPieceRole::CAPTURABLE,
+                )
+                .filter_map(|(ps, role)| {
+                    if self.counts[opponent_idx][role as usize] == 0 {
+                        return None;
+                    }
+
+                    let mut counts = self.counts;
+                    counts[opponent_idx][role as usize] -= 1;
+                    Some(MaterialKey::new(counts, ps))
+                }),
+            );
+
+            // Promotions without piece captures
+            children.extend(
+                iproduct!(
+                    self.pawns.child_pawn_structures_with_piece_captures(color),
+                    HbPieceRole::CAPTURABLE,
+                )
+                .filter_map(|(ps, role)| {
+                    if self.counts[color_idx][role as usize] == 0 {
+                        return None;
+                    }
+
+                    let mut counts = self.counts;
+                    counts[color_idx][role as usize] += 1;
+                    Some(MaterialKey::new(counts, ps))
+                }),
+            );
+
+            // Promotions with piece captures
+            children.extend(
+                iproduct!(
+                    self.pawns.child_pawn_structures_with_piece_captures(color),
+                    HbPieceRole::CAPTURABLE,
+                    HbPieceRole::CAPTURABLE,
+                )
+                .filter_map(|(ps, role1, role2)| {
+                    if self.counts[color_idx][role1 as usize] == 0 {
+                        return None;
+                    }
+
+                    if self.counts[opponent_idx][role2 as usize] == 0 {
+                        return None;
+                    }
+
+                    let mut counts = self.counts;
+                    counts[color_idx][role1 as usize] += 1;
+                    counts[opponent_idx][role2 as usize] -= 1;
+                    Some(MaterialKey::new(counts, ps))
+                }),
+            );
+        }
 
         children
     }
@@ -469,7 +529,26 @@ mod tests {
 
         assert_debug_snapshot!(children, @r#"
         [
+            "Ke5vKN",
             "Ke4vK",
+            "Kf5vK",
+            "Kd5vK",
+        ]
+        "#);
+    }
+
+    #[test]
+    fn child_material_keys_for_kqvk() {
+        let key = MaterialKey::from_string("KQvK").unwrap();
+        let children = key
+            .child_material_keys()
+            .into_iter()
+            .map(|k| k.to_string())
+            .collect::<Vec<String>>();
+
+        assert_debug_snapshot!(children, @r#"
+        [
+            "KvK",
         ]
         "#);
     }

@@ -20,6 +20,14 @@ impl HbPieceRole {
         HbPieceRole::Knight,
     ];
 
+    pub const CAPTURABLE: [HbPieceRole; 5] = [
+        HbPieceRole::Queen,
+        HbPieceRole::Rook,
+        HbPieceRole::DarkBishop,
+        HbPieceRole::LightBishop,
+        HbPieceRole::Knight,
+    ];
+
     pub fn token(self) -> &'static str {
         match self {
             HbPieceRole::King => "K",

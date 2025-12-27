@@ -67,7 +67,6 @@ impl PawnStructure {
 
     /// Returns the pawn structures that can be reached from this pawn structure by moving a pawn,
     /// without capturing or promoting a piece.
-    #[allow(dead_code)]
     pub fn child_pawn_structures_no_piece_changes(&self) -> Vec<PawnStructure> {
         fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
             let can_be_moved_one_square = (Bitboard::FULL
@@ -124,15 +123,13 @@ impl PawnStructure {
                 }))
         }
 
-        std::iter::once(self.clone())
-            .chain(one_sided(&self))
+        one_sided(&self)
             .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
             .collect()
     }
 
     /// Returns the pawn structures that can be reached from this pawn structure when `color` makes a move
     /// by capturing a piece with a pawn without promoting a pawn.
-    #[allow(dead_code)]
     pub fn child_pawn_structures_with_piece_captures(&self, color: Color) -> Vec<PawnStructure> {
         let from_color_perspective = match color {
             Color::White => self,
@@ -230,19 +227,7 @@ mod tests {
                 .child_pawn_structures_no_piece_changes()
                 .into_iter()
                 .map(|ps| ps.to_board())
-                .collect::<Vec<Board>>(), @"
-        [
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            ,
-        ]
-        "
+                .collect::<Vec<Board>>(), @"[]"
         );
     }
 
@@ -264,15 +249,6 @@ mod tests {
         ");
         assert_debug_snapshot!(parent.child_pawn_structures_no_piece_changes().into_iter().map(|ps| ps.to_board()).collect::<Vec<Board>>(), @"
         [
-            . . . . . . . .
-            . . . . p . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . P . . .
-            . . . . . . . .
-            ,
             . . . . . . . .
             . . . . p . . .
             . . . . . . . .
@@ -334,19 +310,7 @@ mod tests {
                 .child_pawn_structures_no_piece_changes()
                 .into_iter()
                 .map(|ps| ps.to_board())
-                .collect::<Vec<Board>>(), @"
-        [
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . p . . .
-            . . . . P . . .
-            . . . . . . . .
-            ,
-        ]
-        "
+                .collect::<Vec<Board>>(), @"[]"
         );
     }
 
@@ -373,15 +337,6 @@ mod tests {
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . p . . .
-            . . . . . . . .
-            . . . . P . . .
-            . . . . . . . .
-            ,
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -428,15 +383,6 @@ mod tests {
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . p . . . .
-            . . . . P . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            ,
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -499,19 +445,7 @@ mod tests {
                 .child_pawn_structures_no_piece_changes()
                 .into_iter()
                 .map(|ps| ps.to_board())
-            .collect::<Vec<Board>>(), @"
-        [
-            . . . . . . . .
-            P . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . p
-            . . . . . . . .
-            ,
-        ]
-        "
+            .collect::<Vec<Board>>(), @"[]"
         );
     }
 
