@@ -124,7 +124,8 @@ impl PawnStructure {
                 }))
         }
 
-        one_sided(&self)
+        std::iter::once(self.clone())
+            .chain(one_sided(&self))
             .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
             .collect()
     }
@@ -262,7 +263,19 @@ mod tests {
                 .child_pawn_structures_no_piece_changes()
                 .into_iter()
                 .map(|ps| ps.to_board())
-                .collect::<Vec<Board>>(), @"[]"
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+        ]
+        "
         );
     }
 
@@ -284,6 +297,15 @@ mod tests {
         ");
         assert_debug_snapshot!(parent.child_pawn_structures_no_piece_changes().into_iter().map(|ps| ps.to_board()).collect::<Vec<Board>>(), @"
         [
+            . . . . . . . .
+            . . . . p . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
             . . . . . . . .
             . . . . p . . .
             . . . . . . . .
@@ -345,7 +367,19 @@ mod tests {
                 .child_pawn_structures_no_piece_changes()
                 .into_iter()
                 .map(|ps| ps.to_board())
-                .collect::<Vec<Board>>(), @"[]"
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
+        ]
+        "
         );
     }
 
@@ -372,6 +406,15 @@ mod tests {
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . . . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -418,6 +461,15 @@ mod tests {
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . p . . . .
+            . . . . P . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -480,7 +532,19 @@ mod tests {
                 .child_pawn_structures_no_piece_changes()
                 .into_iter()
                 .map(|ps| ps.to_board())
-            .collect::<Vec<Board>>(), @"[]"
+            .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            P . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . p
+            . . . . . . . .
+            ,
+        ]
+        "
         );
     }
 
