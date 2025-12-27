@@ -3,6 +3,7 @@ use shakmaty::{
     CastlingMode, Chess, Color, FromSetup, Position, PositionErrorKinds, Setup, Square,
 };
 
+/// This struct is used to create a Goëdel number mapping for all positions of a material key.
 #[derive(Clone)]
 pub struct PositionIndexer {
     material_key: MaterialKey,
