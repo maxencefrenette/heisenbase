@@ -1,10 +1,10 @@
 [project]
-name = "notebooks"
+name = "heisenbase-scripts"
 version = "0.1.0"
-description = "Data exploration notebooks for Heisenbase"
+description = "uv environment for helper scripts for heisenbase"
 requires-python = ">=3.13"
 dependencies = [
-    "ipykernel>=7.0.1",
+    "marimo>=0.18.4",
     "pandas>=2.3.3",
     "pyarrow>=21.0.0",
 ]
