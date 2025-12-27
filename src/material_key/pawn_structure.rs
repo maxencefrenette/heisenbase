@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use shakmaty::{Bitboard, Board, ByColor, File, Rank};
+use shakmaty::{Bitboard, Board, ByColor, Color, File, Rank};
 
 /// Represents the pawn structure of a position, i.e. the pawns on the board.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -130,95 +130,62 @@ impl PawnStructure {
             .collect()
     }
 
-    /// Returns the pawn structures that can be reached from this pawn structure by capturing a piece
-    /// without promoting a pawn.
+    /// Returns the pawn structures that can be reached from this pawn structure when `color` makes a move
+    /// by capturing a piece with a pawn without promoting a pawn.
     #[allow(dead_code)]
-    pub fn child_pawn_structures_with_piece_captures(&self) -> Vec<PawnStructure> {
-        fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
-            let can_capture_left = (Bitboard::FULL
-                .without(Bitboard::BACKRANKS)
-                .without(Bitboard::from_rank(Rank::Seventh)))
-            .without(Bitboard::from_file(File::A))
-                & ps.0.white
-                & !ps.0.black.shift(-7);
-            let can_capture_right = (Bitboard::FULL
-                .without(Bitboard::BACKRANKS)
-                .without(Bitboard::from_rank(Rank::Seventh)))
-            .without(Bitboard::from_file(File::H))
-                & ps.0.white
-                & !ps.0.black.shift(-9);
+    pub fn child_pawn_structures_with_piece_captures(&self, color: Color) -> Vec<PawnStructure> {
+        let from_color_perspective = match color {
+            Color::White => self,
+            Color::Black => &self.flip_sides(),
+        };
 
-            can_capture_right
-                .into_iter()
-                .map(|square| {
-                    let mut child = ps.clone();
-                    child.0.white.discard(square);
-                    child.0.white.add(square.offset(9).unwrap());
-                    child
-                })
-                .chain(can_capture_left.into_iter().map(|square| {
-                    let mut child = ps.clone();
-                    child.0.white.discard(square);
-                    child.0.white.add(square.offset(7).unwrap());
-                    child
-                }))
-        }
+        let can_capture_left = (Bitboard::FULL
+            .without(Bitboard::BACKRANKS)
+            .without(Bitboard::from_rank(Rank::Seventh)))
+        .without(Bitboard::from_file(File::A))
+            & from_color_perspective.0.white
+            & !from_color_perspective.0.black.shift(-7);
+        let can_capture_right = (Bitboard::FULL
+            .without(Bitboard::BACKRANKS)
+            .without(Bitboard::from_rank(Rank::Seventh)))
+        .without(Bitboard::from_file(File::H))
+            & from_color_perspective.0.white
+            & !from_color_perspective.0.black.shift(-9);
 
-        one_sided(&self)
-            .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
+        can_capture_right
+            .into_iter()
+            .map(|square| {
+                let mut child = from_color_perspective.clone();
+                child.0.white.discard(square);
+                child.0.white.add(square.offset(9).unwrap());
+                child
+            })
+            .chain(can_capture_left.into_iter().map(|square| {
+                let mut child = from_color_perspective.clone();
+                child.0.white.discard(square);
+                child.0.white.add(square.offset(7).unwrap());
+                child
+            }))
             .collect()
     }
 
-    /// Returns the pawn structures that can be reached from this pawn structure by promoting a pawn.
+    /// Returns the pawn structures that can be reached from this pawn structure when `color` promotes a pawn.
     #[allow(dead_code)]
-    pub fn child_pawn_structures_with_promotions(&self) -> Vec<PawnStructure> {
-        fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
-            let can_promote_forward = Bitboard::from_rank(Rank::Seventh) & ps.0.white;
+    pub fn child_pawn_structures_with_promotions(&self, color: Color) -> Vec<PawnStructure> {
+        let from_color_perspective = match color {
+            Color::White => self,
+            Color::Black => &self.flip_sides(),
+        };
 
-            can_promote_forward.into_iter().map(|square| {
-                let mut child = ps.clone();
+        let can_promote = Bitboard::from_rank(Rank::Seventh) & from_color_perspective.0.white;
+
+        can_promote
+            .into_iter()
+            .map(|square| {
+                let mut child = from_color_perspective.clone();
                 child.0.white.discard(square);
                 child
             })
-        }
-
-        one_sided(&self)
-            .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
-            .collect()
-    }
-
-    /// Returns the pawn structures that can be reached from this pawn structure by capturing a piece which
-    /// results in a promotion.
-    #[allow(dead_code)]
-    pub fn child_pawn_structures_with_piece_captures_and_promotions(&self) -> Vec<PawnStructure> {
-        fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
-            let can_capture_left = Bitboard::from_rank(Rank::Seventh)
-                .without(Bitboard::from_file(File::A))
-                & ps.0.white;
-            let can_capture_right = Bitboard::from_rank(Rank::Seventh)
-                .without(Bitboard::from_file(File::H))
-                & ps.0.white;
-
-            can_capture_right
-                .into_iter()
-                .map(|square| {
-                    let mut child = ps.clone();
-                    let target = square.offset(9).unwrap();
-                    child.0.white.discard(square);
-                    child.0.black.discard(target);
-                    child
-                })
-                .chain(can_capture_left.into_iter().map(|square| {
-                    let mut child = ps.clone();
-                    let target = square.offset(7).unwrap();
-                    child.0.white.discard(square);
-                    child.0.black.discard(target);
-                    child
-                }))
-        }
-
-        one_sided(&self)
-            .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
             .collect()
     }
 }
@@ -549,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn child_pawn_structures_with_piece_captures_generates_moves_for_both_colors() {
+    fn child_pawn_structures_with_piece_captures_generates_moves_for_white() {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E4),
             Bitboard::from_square(Square::E5),
@@ -566,7 +533,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_piece_captures()
+                .child_pawn_structures_with_piece_captures(Color::White)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -585,24 +552,6 @@ mod tests {
             . . . . . . . .
             . . . P p . . .
             . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            ,
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . P p . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            ,
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . p P . . .
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -630,26 +579,53 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_piece_captures()
+                .child_pawn_structures_with_piece_captures(Color::White)
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"
+        []
+        "
+        );
+    }
+
+    #[test]
+    fn child_pawn_structures_with_piece_captures_generates_moves_for_black() {
+        let parent = PawnStructure::new(
+            Bitboard::from_square(Square::B2),
+            Bitboard::from_square(Square::G7),
+        );
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        . . . . . . p .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . P . . . . . .
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_with_piece_captures(Color::Black)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
             . . . . . . . .
+            . p . . . . . .
             . . . . . . . .
             . . . . . . . .
-            . . . p . . . .
-            . . . . P . p .
             . . . . . . . .
+            . . . . . . . P
             . . . . . . . .
             . . . . . . . .
             ,
             . . . . . . . .
+            . p . . . . . .
             . . . . . . . .
             . . . . . . . .
-            . . . . . p . .
-            . . p . P . . .
             . . . . . . . .
+            . . . . . P . .
             . . . . . . . .
             . . . . . . . .
             ,
@@ -659,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn child_pawn_structures_with_promotions_removes_promoting_pawn() {
+    fn child_pawn_structures_with_promotions_removes_promoting_pawn_for_white() {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::A7),
             Bitboard::from_square(Square::H2),
@@ -676,7 +652,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_promotions()
+                .child_pawn_structures_with_promotions(Color::White)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -690,39 +666,30 @@ mod tests {
             . . . . . . . p
             . . . . . . . .
             ,
-            . . . . . . . .
-            P . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            ,
         ]
         "
         );
     }
 
     #[test]
-    fn child_pawn_structures_with_piece_captures_and_promotions_removes_captured_pawn() {
+    fn child_pawn_structures_with_promotions_from_black_perspective() {
         let parent = PawnStructure::new(
-            Bitboard::from_square(Square::B7),
-            Bitboard::from_square(Square::G2),
+            Bitboard::from_square(Square::H7),
+            Bitboard::from_square(Square::A2),
         );
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
-        . P . . . . . .
+        . . . . . . . P
         . . . . . . . .
         . . . . . . . .
         . . . . . . . .
         . . . . . . . .
-        . . . . . . p .
+        p . . . . . . .
         . . . . . . . .
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_piece_captures_and_promotions()
+                .child_pawn_structures_with_promotions(Color::Black)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -733,34 +700,7 @@ mod tests {
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
-            . . . . . . p .
-            . . . . . . . .
-            ,
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . p .
-            . . . . . . . .
-            ,
-            . . . . . . . .
-            . P . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            ,
-            . . . . . . . .
-            . P . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
-            . . . . . . . .
+            . . . . . . . p
             . . . . . . . .
             ,
         ]
