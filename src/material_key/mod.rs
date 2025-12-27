@@ -42,10 +42,6 @@ impl MaterialKey {
     /// Pieces appearing before the separator are interpreted as white, while those after
     /// it are treated as black.
     ///
-    /// # Use cases
-    /// This is primarily useful for tests and simple user interfaces that need
-    /// to describe a set of pieces without board coordinates.
-    ///
     /// # Errors
     /// Returns `None` if the string is malformed, contains unsupported
     /// tokens, has a missing or extra separator, or is otherwise ambiguous.
