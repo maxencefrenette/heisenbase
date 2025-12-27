@@ -20,8 +20,14 @@ def _():
     df["usefulness"] = 1000 * df["num_games"] / df["total_positions"]
     df = df.sort_values("usefulness", ascending=False)
     df.reset_index(drop=True, inplace=True)
-    df.head(1_000_000)
     return (df,)
+
+
+@app.cell
+def _(df):
+
+    df.head(1_000_000)
+    return
 
 
 @app.cell
