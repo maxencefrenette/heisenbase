@@ -3,7 +3,7 @@ mod pawn_structure;
 
 use crate::material_key::pawn_structure::PawnStructure;
 use shakmaty::{Bitboard, Chess, Color, Position, Role, Square};
-use std::fmt;
+use std::{cmp::Ordering, fmt};
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -11,8 +11,9 @@ pub use hb_piece::{HbPiece, HbPieceRole};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaterialKey {
     /// Piece counts indexed by color then piece descriptor.
-    /// By convention the strong side is always first and it is encoded as white
-    /// whenever we convert to a position.
+    /// By convention the strong side is encoded as white when pawn structures
+    /// are symmetric under a vertical flip; otherwise pawn-structure ordering
+    /// takes precedence and the stronger side may appear second.
     pub counts: [[u8; HbPieceRole::ALL.len()]; 2],
     pub pawns: PawnStructure,
 }
@@ -132,6 +133,18 @@ impl MaterialKey {
     }
 
     fn canonicalize(&mut self) {
+        let order = self.pawns.0.white.cmp(&self.pawns.0.black.flip_vertical());
+        match order {
+            Ordering::Less => {
+                self.mirror_sides();
+                return;
+            }
+            Ordering::Equal => (),
+            Ordering::Greater => {
+                return;
+            }
+        }
+
         // Ensure that the stronger side is white.
         if Self::strong_color_from_counts(&self.counts) == Color::Black {
             self.mirror_sides();
@@ -144,11 +157,11 @@ impl MaterialKey {
     }
 
     fn should_swap_bishops(&self) -> bool {
-        if self.has_pawns() {
+        if !self.has_bishops() {
             return false;
         }
 
-        if !self.has_bishops() {
+        if !self.pawns.is_symmetric_horizontal() {
             return false;
         }
 
@@ -169,6 +182,8 @@ impl MaterialKey {
             self.counts[color_idx][light_idx] = dark;
             self.counts[color_idx][dark_idx] = light;
         }
+
+        self.pawns = self.pawns.flip_horizontal();
     }
 
     fn swapped_bishop_counts(
@@ -254,8 +269,6 @@ impl MaterialKey {
         if let Some(color) = compare(counts[0][knight_idx], counts[1][knight_idx]) {
             return color;
         }
-
-        // TODO: do we need to compare pawn counts here?
 
         Color::White
     }

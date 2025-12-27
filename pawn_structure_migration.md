@@ -4,7 +4,8 @@
 
 - `MaterialKey` is count-based only (`KQvK`, `KPvK`, …) and stores piece counts per color in `counts`.
 - Canonicalization currently:
-  - Swaps sides so the stronger side is encoded as white.
+  - Orders pawn structures by comparing White pawns against a vertically flipped view of Black pawns; when they differ, this ordering is the only canonicalization applied.
+  - When pawn structures are symmetric under the vertical flip, swaps sides so the stronger side is encoded as white.
   - Optionally flips bishop colors via a left-to-right mirror **only when there are no pawns** (see `MaterialKey::should_swap_bishops`).
 - `PositionIndexer` enumerates placements for **all** pieces returned by `MaterialKey::pieces()` (including pawns) with a naive 64/32 radix; overlaps are rejected at runtime.
 - WDL files use version `1` with a serialized material key string.
@@ -29,7 +30,8 @@ Make pawn locations explicit in `MaterialKey` so each pawn square is part of the
     - Reject malformed squares, duplicate pawn squares, or unknown tokens.
 - **Canonicalization**
   - Keep existing canonicalization behavior:
-    - Strong side becomes white (swap `counts` **and** pawn bitboards).
+    - Order by pawn structures first; if they differ, do not force the strong side to be white.
+    - If pawn structures are symmetric under a vertical flip, the strong side becomes white (swap `counts` **and** pawn bitboards).
     - Bishop color swap is still allowed **only when no pawns exist**; with pawns present, do not mirror.
 - **API changes**
   - `MaterialKey::from_string` parses square tokens for pawns; `P` tokens are invalid.

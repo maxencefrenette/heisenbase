@@ -29,10 +29,26 @@ impl PawnStructure {
         self.occupied().count() as u32
     }
 
+    pub fn is_symmetric_sides(&self) -> bool {
+        self.0.white == self.0.black.flip_vertical()
+    }
+
+    pub fn is_symmetric_horizontal(&self) -> bool {
+        self.0.white == self.0.white.flip_horizontal()
+            && self.0.black == self.0.black.flip_horizontal()
+    }
+
     pub fn flip_sides(&self) -> Self {
         Self(ByColor {
             white: self.0.black.flip_vertical(),
             black: self.0.white.flip_vertical(),
+        })
+    }
+
+    pub fn flip_horizontal(&self) -> Self {
+        Self(ByColor {
+            white: self.0.white.flip_horizontal(),
+            black: self.0.black.flip_horizontal(),
         })
     }
 
