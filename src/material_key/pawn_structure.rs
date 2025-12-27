@@ -1,33 +1,30 @@
 #[cfg(test)]
 use shakmaty::Board;
-use shakmaty::{Bitboard, File, Rank};
+use shakmaty::{Bitboard, ByColor, File, Rank};
 
 /// Represents the pawn structure of a position, i.e. the pawns on the board.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PawnStructure {
-    pub pawn_bitboards: [Bitboard; 2],
-}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PawnStructure(ByColor<Bitboard>);
 
 impl PawnStructure {
     #[cfg(test)]
     pub fn new(white_pawns: Bitboard, black_pawns: Bitboard) -> Self {
-        Self {
-            pawn_bitboards: [white_pawns, black_pawns],
-        }
+        Self(ByColor {
+            white: white_pawns,
+            black: black_pawns,
+        })
     }
 
     #[cfg(test)]
     pub fn occupied(&self) -> Bitboard {
-        self.pawn_bitboards[0] | self.pawn_bitboards[1]
+        self.0.white | self.0.black
     }
 
     pub fn flip_sides(&self) -> Self {
-        Self {
-            pawn_bitboards: [
-                self.pawn_bitboards[1].flip_vertical(),
-                self.pawn_bitboards[0].flip_vertical(),
-            ],
-        }
+        Self(ByColor {
+            white: self.0.black.flip_vertical(),
+            black: self.0.white.flip_vertical(),
+        })
     }
 
     #[cfg(test)]
@@ -37,8 +34,8 @@ impl PawnStructure {
         let mut by_role = ByRole::default();
         by_role[Role::Pawn] = self.occupied();
         let by_color = ByColor {
-            white: self.pawn_bitboards[0],
-            black: self.pawn_bitboards[1],
+            white: self.0.white,
+            black: self.0.black,
         };
         Board::try_from_bitboards(by_role, by_color).unwrap()
     }
@@ -51,53 +48,53 @@ impl PawnStructure {
             let can_be_moved_one_square = (Bitboard::FULL
                 .without(Bitboard::BACKRANKS)
                 .without(Bitboard::from_rank(Rank::Seventh)))
-                & ps.pawn_bitboards[0]
-                & !ps.pawn_bitboards[1].shift(-8);
+                & ps.0.white
+                & !ps.0.black.shift(-8);
             let can_be_moved_two_squares = Bitboard::from_rank(Rank::Second)
-                & ps.pawn_bitboards[0]
-                & !ps.pawn_bitboards[1].shift(-8)
-                & !ps.pawn_bitboards[1].shift(-16);
+                & ps.0.white
+                & !ps.0.black.shift(-8)
+                & !ps.0.black.shift(-16);
             let can_capture_left = (Bitboard::FULL
                 .without(Bitboard::BACKRANKS)
                 .without(Bitboard::from_rank(Rank::Seventh)))
             .without(Bitboard::from_file(File::A))
-                & ps.pawn_bitboards[0]
-                & ps.pawn_bitboards[1].shift(-7);
+                & ps.0.white
+                & ps.0.black.shift(-7);
             let can_capture_right = (Bitboard::FULL
                 .without(Bitboard::BACKRANKS)
                 .without(Bitboard::from_rank(Rank::Seventh)))
             .without(Bitboard::from_file(File::H))
-                & ps.pawn_bitboards[0]
-                & ps.pawn_bitboards[1].shift(-9);
+                & ps.0.white
+                & ps.0.black.shift(-9);
 
             can_be_moved_one_square
                 .into_iter()
                 .map(|square| {
                     let mut child = ps.clone();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[0].add(square.offset(8).unwrap());
+                    child.0.white.discard(square);
+                    child.0.white.add(square.offset(8).unwrap());
                     child
                 })
                 .chain(can_be_moved_two_squares.into_iter().map(|square| {
                     let mut child = ps.clone();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[0].add(square.offset(16).unwrap());
+                    child.0.white.discard(square);
+                    child.0.white.add(square.offset(16).unwrap());
                     child
                 }))
                 .chain(can_capture_right.into_iter().map(|square| {
                     let mut child = ps.clone();
                     let target = square.offset(9).unwrap();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[0].add(target);
-                    child.pawn_bitboards[1].discard(target);
+                    child.0.white.discard(square);
+                    child.0.white.add(target);
+                    child.0.black.discard(target);
                     child
                 }))
                 .chain(can_capture_left.into_iter().map(|square| {
                     let mut child = ps.clone();
                     let target = square.offset(7).unwrap();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[0].add(target);
-                    child.pawn_bitboards[1].discard(target);
+                    child.0.white.discard(square);
+                    child.0.white.add(target);
+                    child.0.black.discard(target);
                     child
                 }))
         }
@@ -116,27 +113,27 @@ impl PawnStructure {
                 .without(Bitboard::BACKRANKS)
                 .without(Bitboard::from_rank(Rank::Seventh)))
             .without(Bitboard::from_file(File::A))
-                & ps.pawn_bitboards[0]
-                & !ps.pawn_bitboards[1].shift(-7);
+                & ps.0.white
+                & !ps.0.black.shift(-7);
             let can_capture_right = (Bitboard::FULL
                 .without(Bitboard::BACKRANKS)
                 .without(Bitboard::from_rank(Rank::Seventh)))
             .without(Bitboard::from_file(File::H))
-                & ps.pawn_bitboards[0]
-                & !ps.pawn_bitboards[1].shift(-9);
+                & ps.0.white
+                & !ps.0.black.shift(-9);
 
             can_capture_right
                 .into_iter()
                 .map(|square| {
                     let mut child = ps.clone();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[0].add(square.offset(9).unwrap());
+                    child.0.white.discard(square);
+                    child.0.white.add(square.offset(9).unwrap());
                     child
                 })
                 .chain(can_capture_left.into_iter().map(|square| {
                     let mut child = ps.clone();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[0].add(square.offset(7).unwrap());
+                    child.0.white.discard(square);
+                    child.0.white.add(square.offset(7).unwrap());
                     child
                 }))
         }
@@ -150,11 +147,11 @@ impl PawnStructure {
     #[allow(dead_code)]
     pub fn child_pawn_structures_with_promotions(&self) -> Vec<PawnStructure> {
         fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
-            let can_promote_forward = Bitboard::from_rank(Rank::Seventh) & ps.pawn_bitboards[0];
+            let can_promote_forward = Bitboard::from_rank(Rank::Seventh) & ps.0.white;
 
             can_promote_forward.into_iter().map(|square| {
                 let mut child = ps.clone();
-                child.pawn_bitboards[0].discard(square);
+                child.0.white.discard(square);
                 child
             })
         }
@@ -171,25 +168,25 @@ impl PawnStructure {
         fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
             let can_capture_left = Bitboard::from_rank(Rank::Seventh)
                 .without(Bitboard::from_file(File::A))
-                & ps.pawn_bitboards[0];
+                & ps.0.white;
             let can_capture_right = Bitboard::from_rank(Rank::Seventh)
                 .without(Bitboard::from_file(File::H))
-                & ps.pawn_bitboards[0];
+                & ps.0.white;
 
             can_capture_right
                 .into_iter()
                 .map(|square| {
                     let mut child = ps.clone();
                     let target = square.offset(9).unwrap();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[1].discard(target);
+                    child.0.white.discard(square);
+                    child.0.black.discard(target);
                     child
                 })
                 .chain(can_capture_left.into_iter().map(|square| {
                     let mut child = ps.clone();
                     let target = square.offset(7).unwrap();
-                    child.pawn_bitboards[0].discard(square);
-                    child.pawn_bitboards[1].discard(target);
+                    child.0.white.discard(square);
+                    child.0.black.discard(target);
                     child
                 }))
         }
