@@ -50,90 +50,70 @@ impl MaterialKey {
     /// Returns `None` if the string is malformed, contains unsupported
     /// tokens, has a missing or extra separator, or is otherwise ambiguous.
     pub fn from_string(s: &str) -> Option<Self> {
-        let mut parts = s.split('v');
-        let white = parts.next()?;
-        let black = parts.next()?;
-
-        // Only one separator is allowed.
-        if parts.next().is_some() {
+        let (white, black) = s.split_once('v')?;
+        if black.contains('v') {
             return None;
         }
 
         let mut counts = [[0u8; HbPieceRole::ALL.len()]; 2];
         let mut pawn_bitboards = [Bitboard::EMPTY, Bitboard::EMPTY];
+        let mut occupied = Bitboard::EMPTY;
 
         fn push_pieces(
             out: &mut [[u8; HbPieceRole::ALL.len()]; 2],
             pawns: &mut [Bitboard; 2],
+            occupied: &mut Bitboard,
             s: &str,
-            color: Color,
+            color_idx: usize,
         ) -> Option<()> {
-            let color_idx = match color {
-                Color::White => 0,
-                Color::Black => 1,
-            };
-
             let bytes = s.as_bytes();
             let mut i = 0;
             while i < bytes.len() {
-                let token = match bytes[i] as char {
-                    'B' => {
-                        if i + 1 >= bytes.len() {
-                            return None;
-                        }
-                        match bytes[i + 1] as char {
-                            'l' => {
-                                i += 2;
-                                "Bl"
-                            }
-                            'd' => {
-                                i += 2;
-                                "Bd"
-                            }
+                match bytes[i] {
+                    b'K' => {
+                        out[color_idx][HbPieceRole::King as usize] += 1;
+                        i += 1;
+                    }
+                    b'Q' => {
+                        out[color_idx][HbPieceRole::Queen as usize] += 1;
+                        i += 1;
+                    }
+                    b'R' => {
+                        out[color_idx][HbPieceRole::Rook as usize] += 1;
+                        i += 1;
+                    }
+                    b'N' => {
+                        out[color_idx][HbPieceRole::Knight as usize] += 1;
+                        i += 1;
+                    }
+                    b'B' => {
+                        let next = *bytes.get(i + 1)?;
+                        let role = match next {
+                            b'l' => HbPieceRole::LightBishop,
+                            b'd' => HbPieceRole::DarkBishop,
                             _ => return None,
-                        }
+                        };
+                        out[color_idx][role as usize] += 1;
+                        i += 2;
                     }
-                    'K' => {
-                        i += 1;
-                        "K"
-                    }
-                    'Q' => {
-                        i += 1;
-                        "Q"
-                    }
-                    'R' => {
-                        i += 1;
-                        "R"
-                    }
-                    'N' => {
-                        i += 1;
-                        "N"
-                    }
-                    'a'..='h' => {
-                        if i + 1 >= bytes.len() {
-                            return None;
-                        }
+                    b'a'..=b'h' => {
                         let square = Square::from_ascii(&bytes[i..i + 2]).ok()?;
-                        let occupied = pawns[0] | pawns[1];
                         if occupied.contains(square) {
                             return None;
                         }
                         pawns[color_idx].add(square);
+                        occupied.add(square);
                         i += 2;
-                        continue;
                     }
                     _ => return None,
-                };
-
-                let pd = HbPieceRole::from_token(token)?;
-                out[color_idx][pd as usize] += 1;
+                }
             }
 
             Some(())
         }
 
-        push_pieces(&mut counts, &mut pawn_bitboards, white, Color::White)?;
-        push_pieces(&mut counts, &mut pawn_bitboards, black, Color::Black)?;
+        push_pieces(&mut counts, &mut pawn_bitboards, &mut occupied, white, 0)?;
+        push_pieces(&mut counts, &mut pawn_bitboards, &mut occupied, black, 1)?;
 
         let pawns = PawnStructure::new(pawn_bitboards[0], pawn_bitboards[1]);
 
