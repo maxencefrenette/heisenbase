@@ -10,6 +10,7 @@ use std::{
 
 use flate2::read::MultiGzDecoder;
 use heisenbase::material_key::MaterialKey;
+use heisenbase::position_indexer::PositionIndexer;
 use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
 use polars::{
     error::PolarsError,
@@ -106,9 +107,11 @@ fn process_reader<R: Read>(
 fn write_full_index(entries: &[(MaterialKey, u64)]) -> io::Result<()> {
     let mut material_keys = Vec::with_capacity(entries.len());
     let mut counts = Vec::with_capacity(entries.len());
+    let mut total_positions = Vec::with_capacity(entries.len());
     for (key, count) in entries {
         material_keys.push(key.to_string());
         counts.push(*count);
+        total_positions.push(PositionIndexer::new(key.clone()).total_positions() as u64);
     }
 
     if let Some(parent) = Path::new(PARQUET_PATH).parent() {
@@ -118,6 +121,7 @@ fn write_full_index(entries: &[(MaterialKey, u64)]) -> io::Result<()> {
     let mut df = DataFrame::new(vec![
         Series::new("material_key", material_keys),
         Series::new("num_games", counts),
+        Series::new("total_positions", total_positions),
     ])
     .map_err(polars_to_io_error)?;
 
