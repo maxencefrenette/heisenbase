@@ -17,24 +17,26 @@ app = marimo.App()
 @app.cell
 def _():
     import pandas as pd
+    import marimo as mo
 
     df = pd.read_parquet("../data/pgn_index.parquet")
     df["usefulness"] = 1000 * df["num_games"] / df["total_positions"]
     df = df.sort_values("usefulness", ascending=False)
     df.reset_index(drop=True, inplace=True)
+
+    mo.md(f"Total number of material keys: {len(df):,}")
     return (df,)
 
 
 @app.cell
 def _(df):
-
-    df.head(1_000_000)
+    df.head(10_000)
     return
 
 
 @app.cell
 def _(df):
-    df[df["total_positions"] > 8192].head(1_000_000)
+    df[df["total_positions"] > 8192].head(10_000)
     return
 
 
