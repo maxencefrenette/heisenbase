@@ -34,23 +34,29 @@ pub fn run() -> io::Result<()> {
     collect_pgn_files(Path::new(PGN_ROOT), &mut files)?;
     files.sort();
 
-    let mut counts: HashMap<MaterialKey, u64> = HashMap::new();
+    let mut counts_games: HashMap<MaterialKey, u64> = HashMap::new();
+    let mut counts_positions: HashMap<MaterialKey, u64> = HashMap::new();
     let mut total_games: u64 = 0;
 
     for path in files {
         println!("Processing {}", path.display());
         let file = File::open(&path)?;
         let game_count = if is_gz(&path) {
-            process_reader(MultiGzDecoder::new(file), &mut counts, &path)?
+            process_reader(
+                MultiGzDecoder::new(file),
+                &mut counts_games,
+                &mut counts_positions,
+                &path,
+            )?
         } else {
-            process_reader(file, &mut counts, &path)?
+            process_reader(file, &mut counts_games, &mut counts_positions, &path)?
         };
         total_games += game_count;
     }
 
     println!("Processed {total_games} games.");
 
-    let mut entries: Vec<_> = counts.into_iter().collect();
+    let mut entries: Vec<_> = counts_games.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     for (idx, (key, count)) in entries.iter().take(TOP_COUNT).enumerate() {
@@ -68,18 +74,23 @@ pub fn run() -> io::Result<()> {
         );
     }
 
-    write_full_index(&entries)?;
+    write_full_index(&entries, &counts_positions)?;
 
     Ok(())
 }
 
 fn process_reader<R: Read>(
     reader: R,
-    counts: &mut HashMap<MaterialKey, u64>,
+    counts_games: &mut HashMap<MaterialKey, u64>,
+    counts_positions: &mut HashMap<MaterialKey, u64>,
     path: &Path,
 ) -> io::Result<u64> {
     let mut reader = Reader::new(reader);
-    let mut visitor = IndexVisitor { counts, games: 0 };
+    let mut visitor = IndexVisitor {
+        counts_games,
+        counts_positions,
+        games: 0,
+    };
     let mut skipped = SkipStats::default();
     loop {
         match reader.read_game(&mut visitor) {
@@ -106,14 +117,19 @@ fn process_reader<R: Read>(
     Ok(visitor.games)
 }
 
-fn write_full_index(entries: &[(MaterialKey, u64)]) -> io::Result<()> {
+fn write_full_index(
+    entries: &[(MaterialKey, u64)],
+    counts_positions: &HashMap<MaterialKey, u64>,
+) -> io::Result<()> {
     let mut material_keys = Vec::with_capacity(entries.len());
-    let mut counts = Vec::with_capacity(entries.len());
-    let mut total_positions = Vec::with_capacity(entries.len());
-    for (key, count) in entries {
+    let mut counts_games = Vec::with_capacity(entries.len());
+    let mut counts_positions_vec = Vec::with_capacity(entries.len());
+    let mut material_key_size = Vec::with_capacity(entries.len());
+    for (key, count_games) in entries {
         material_keys.push(key.to_string());
-        counts.push(*count);
-        total_positions.push(PositionIndexer::new(key.clone()).total_positions() as u64);
+        counts_games.push(*count_games);
+        counts_positions_vec.push(*counts_positions.get(key).unwrap_or(&0));
+        material_key_size.push(PositionIndexer::new(key.clone()).total_positions() as u64);
     }
 
     if let Some(parent) = Path::new(PARQUET_PATH).parent() {
@@ -122,8 +138,9 @@ fn write_full_index(entries: &[(MaterialKey, u64)]) -> io::Result<()> {
 
     let mut df = DataFrame::new(vec![
         Series::new("material_key", material_keys),
-        Series::new("num_games", counts),
-        Series::new("total_positions", total_positions),
+        Series::new("material_key_size", material_key_size),
+        Series::new("num_games", counts_games),
+        Series::new("num_positions", counts_positions_vec),
     ])
     .map_err(polars_to_io_error)?;
 
@@ -140,7 +157,8 @@ fn polars_to_io_error(err: PolarsError) -> io::Error {
 }
 
 struct IndexVisitor<'a> {
-    counts: &'a mut HashMap<MaterialKey, u64>,
+    counts_games: &'a mut HashMap<MaterialKey, u64>,
+    counts_positions: &'a mut HashMap<MaterialKey, u64>,
     games: u64,
 }
 
@@ -193,7 +211,8 @@ impl<'a> Visitor for IndexVisitor<'a> {
         let mut seen = HashSet::new();
         if let Some(key) = MaterialKey::from_position(&position) {
             if key.non_pawn_piece_count() <= MAX_NON_PAWN {
-                seen.insert(key);
+                seen.insert(key.clone());
+                *self.counts_positions.entry(key).or_insert(0) += 1;
             }
         }
         ControlFlow::Continue(GameState { position, seen })
@@ -223,7 +242,8 @@ impl<'a> Visitor for IndexVisitor<'a> {
         movetext.position.play_unchecked(mv);
         if let Some(key) = MaterialKey::from_position(&movetext.position) {
             if key.non_pawn_piece_count() <= MAX_NON_PAWN {
-                movetext.seen.insert(key);
+                movetext.seen.insert(key.clone());
+                *self.counts_positions.entry(key).or_insert(0) += 1;
             }
         }
         ControlFlow::Continue(())
@@ -232,7 +252,7 @@ impl<'a> Visitor for IndexVisitor<'a> {
     fn end_game(&mut self, movetext: Self::Movetext) -> Self::Output {
         self.games += 1;
         for key in movetext.seen {
-            *self.counts.entry(key).or_insert(0) += 1;
+            *self.counts_games.entry(key).or_insert(0) += 1;
         }
         Ok(())
     }
