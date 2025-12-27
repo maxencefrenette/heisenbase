@@ -1,3 +1,5 @@
+/// Contains the code to index PGN files to find the most common material keys.
+/// Stores the results in a Parquet file.
 use std::{
     collections::{HashMap, HashSet},
     fs,
