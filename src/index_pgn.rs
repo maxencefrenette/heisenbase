@@ -67,21 +67,6 @@ pub fn run() -> io::Result<()> {
     let mut entries: Vec<_> = counts_games.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-    for (idx, (key, count)) in entries.iter().take(TOP_COUNT).enumerate() {
-        let percent = if total_games == 0 {
-            0.0
-        } else {
-            (*count as f64 / total_games as f64) * 100.0
-        };
-        println!(
-            "{:>2}. {} ({} games, {:.2}%)",
-            idx + 1,
-            key,
-            *count,
-            percent
-        );
-    }
-
     write_full_index(&entries, &counts_positions, total_games, total_positions)?;
 
     Ok(())
