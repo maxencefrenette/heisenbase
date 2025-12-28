@@ -516,9 +516,7 @@ mod tests {
                 .child_pawn_structures_with_piece_captures(Color::White)
                 .into_iter()
                 .map(|ps| ps.to_board())
-                .collect::<Vec<Board>>(), @"
-        []
-        "
+                .collect::<Vec<Board>>(), @"[]"
         );
     }
 
