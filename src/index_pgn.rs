@@ -37,6 +37,7 @@ pub fn run() -> io::Result<()> {
     let mut counts_games: HashMap<MaterialKey, u64> = HashMap::new();
     let mut counts_positions: HashMap<MaterialKey, u64> = HashMap::new();
     let mut total_games: u64 = 0;
+    let mut total_positions: u64 = 0;
 
     for path in files {
         println!("Processing {}", path.display());
@@ -46,15 +47,20 @@ pub fn run() -> io::Result<()> {
                 MultiGzDecoder::new(file),
                 &mut counts_games,
                 &mut counts_positions,
+                &mut total_positions,
                 &path,
             )?
         } else {
-            process_reader(file, &mut counts_games, &mut counts_positions, &path)?
+            process_reader(
+                file,
+                &mut counts_games,
+                &mut counts_positions,
+                &mut total_positions,
+                &path,
+            )?
         };
         total_games += game_count;
     }
-
-    let total_positions: u64 = counts_positions.values().sum();
 
     println!("Processed {total_games} games.");
 
@@ -85,12 +91,14 @@ fn process_reader<R: Read>(
     reader: R,
     counts_games: &mut HashMap<MaterialKey, u64>,
     counts_positions: &mut HashMap<MaterialKey, u64>,
+    total_positions: &mut u64,
     path: &Path,
 ) -> io::Result<u64> {
     let mut reader = Reader::new(reader);
     let mut visitor = IndexVisitor {
         counts_games,
         counts_positions,
+        total_positions,
         games: 0,
     };
     let mut skipped = SkipStats::default();
@@ -169,6 +177,7 @@ fn polars_to_io_error(err: PolarsError) -> io::Error {
 struct IndexVisitor<'a> {
     counts_games: &'a mut HashMap<MaterialKey, u64>,
     counts_positions: &'a mut HashMap<MaterialKey, u64>,
+    total_positions: &'a mut u64,
     games: u64,
 }
 
@@ -220,6 +229,7 @@ impl<'a> Visitor for IndexVisitor<'a> {
         let position = tags.unwrap_or_default();
         let mut seen = HashSet::new();
         if let Some(key) = MaterialKey::from_position(&position) {
+            *self.total_positions += 1;
             if key.non_pawn_piece_count() <= MAX_NON_PAWN {
                 seen.insert(key.clone());
                 *self.counts_positions.entry(key).or_insert(0) += 1;
@@ -251,6 +261,7 @@ impl<'a> Visitor for IndexVisitor<'a> {
         };
         movetext.position.play_unchecked(mv);
         if let Some(key) = MaterialKey::from_position(&movetext.position) {
+            *self.total_positions += 1;
             if key.non_pawn_piece_count() <= MAX_NON_PAWN {
                 movetext.seen.insert(key.clone());
                 *self.counts_positions.entry(key).or_insert(0) += 1;
