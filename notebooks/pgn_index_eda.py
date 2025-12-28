@@ -22,10 +22,10 @@ def _():
 
     df = pd.read_parquet("../data/pgn_index.parquet")
     df = df[df["num_games"] > 1]
-    df["cumulative_positions"] = (df["num_positions"] / df["total_positions"]).cumsum()
-    df["cumulative_material_key_size"] = df["material_key_size"].cumsum()
     df["utility"] = 1_000_000_000 * df["num_positions"] / df["total_positions"] / df["material_key_size"]
     df = df.sort_values("utility", ascending=False)
+    df["cumulative_positions"] = (df["num_positions"] / df["total_positions"]).cumsum()
+    df["cumulative_material_key_size"] = df["material_key_size"].cumsum()
     df.reset_index(drop=True, inplace=True)
 
     mo.md(f"Number of indexed material keys: {len(df):,}")
@@ -46,12 +46,25 @@ def _(df):
 
 @app.cell
 def _(alt, df):
-    df2 = df[df["cumulative_material_key_size"] < 1e9]
+    def chart1(max_cumulative_material_key_size):
+        df2 = df[df["cumulative_material_key_size"] < 1e9]
 
-    alt.Chart(df2).mark_line().encode(
-        x='cumulative_material_key_size',
-        y='cumulative_positions',
-    )
+        return alt.Chart(df2).mark_line().encode(
+            x='cumulative_material_key_size',
+            y='cumulative_positions',
+        )
+    return (chart1,)
+
+
+@app.cell
+def _(chart1):
+    chart1(1e9)
+    return
+
+
+@app.cell
+def _(chart1):
+    chart1(1e12)
     return
 
 
