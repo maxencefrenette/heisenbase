@@ -47,7 +47,11 @@ def _(df):
 @app.cell
 def _(alt, df):
     def chart1(max_cumulative_material_key_size):
-        df2 = df[df["cumulative_material_key_size"] < 1e9]
+        df2 = df[df["cumulative_material_key_size"] < max_cumulative_material_key_size]
+
+        if len(df2) > 1000:
+            step = len(df2) // 1000
+            df2 = df2.iloc[::step]
 
         return alt.Chart(df2).mark_line().encode(
             x='cumulative_material_key_size',
