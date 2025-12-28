@@ -18,14 +18,18 @@ app = marimo.App()
 def _():
     import pandas as pd
     import marimo as mo
+    import altair as alt
 
     df = pd.read_parquet("../data/pgn_index.parquet")
+    df = df[df["num_games"] > 1]
+    df["cumulative_positions"] = (df["num_positions"] / df["total_positions"]).cumsum()
+    df["cumulative_material_key_size"] = df["material_key_size"].cumsum()
     df["utility"] = 1_000_000_000 * df["num_positions"] / df["total_positions"] / df["material_key_size"]
     df = df.sort_values("utility", ascending=False)
     df.reset_index(drop=True, inplace=True)
 
     mo.md(f"Number of indexed material keys: {len(df):,}")
-    return (df,)
+    return alt, df
 
 
 @app.cell
@@ -37,6 +41,17 @@ def _(df):
 @app.cell
 def _(df):
     df[df["material_key_size"] > 8192].head(10_000)
+    return
+
+
+@app.cell
+def _(alt, df):
+    df2 = df[df["cumulative_material_key_size"] < 1e9]
+
+    alt.Chart(df2).mark_line().encode(
+        x='cumulative_material_key_size',
+        y='cumulative_positions',
+    )
     return
 
 
