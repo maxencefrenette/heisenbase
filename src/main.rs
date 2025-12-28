@@ -1,8 +1,8 @@
 mod index_pgn;
 
 use clap::{Parser, Subcommand};
-use polars::prelude::{ParquetReader, SerReader};
-use std::{error::Error, fs::File, io, path::Path};
+use polars::prelude::*;
+use std::{error::Error, io, path::Path};
 
 use heisenbase::material_key::MaterialKey;
 use heisenbase::table_builder::TableBuilder;
@@ -126,35 +126,32 @@ fn run_generate(material: MaterialKey) -> io::Result<()> {
 }
 
 fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), Box<dyn Error>> {
-    let df = ParquetReader::new(File::open(index_pgn::PARQUET_PATH)?)
-        .finish()
-        .expect("invalid parquet data");
+    let df = LazyFrame::scan_parquet(index_pgn::PARQUET_PATH, Default::default())
+        .unwrap()
+        .filter(col("num_games").gt(1))
+        .with_columns([
+            (lit(1_000_000_000f64) * col("num_positions").cast(DataType::Float64)
+                / col("total_positions").cast(DataType::Float64)
+                / col("material_key_size").cast(DataType::Float64))
+            .alias("utility"),
+        ])
+        .sort(
+            ["utility"],
+            SortMultipleOptions::new().with_order_descending(true),
+        )
+        .collect()
+        .unwrap();
 
-    let keys = df
-        .column("material_key")
-        .expect("missing material_key column")
-        .str()
-        .expect("material_key not utf8")
-        .into_iter();
-    let games = df
-        .column("num_games")
-        .expect("missing num_games column")
-        .u64()
-        .expect("num_games not u64")
-        .into_iter();
+    let keys = df.column("material_key").unwrap();
 
     let mut candidates = Vec::new();
-    for (key, count) in keys.zip(games) {
-        let count = count.expect("num_games null");
-        if count < min_games {
-            continue;
-        }
-        let material = MaterialKey::from_string(key.expect("material_key null"))
+    for key in keys.str().unwrap().into_iter() {
+        let material_key = MaterialKey::from_string(key.expect("material_key null"))
             .expect("invalid material key");
-        if material.total_piece_count() > max_pieces {
+        if material_key.total_piece_count() > max_pieces {
             continue;
         }
-        candidates.push((material, count));
+        candidates.push(material_key);
     }
 
     if candidates.is_empty() {
@@ -172,15 +169,15 @@ fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), Box<dyn Erro
         max_pieces
     );
 
-    for (material, count) in candidates {
-        let material_str = material.to_string();
+    for material_key in candidates {
+        let material_str = material_key.to_string();
         let filename = format!("./data/heisenbase/{}.hbt", material_str);
         if Path::new(&filename).exists() {
             println!("Skipping {} (already exists)", material_str);
             continue;
         }
-        println!("Generating {} ({} games)", material_str, count);
-        if let Err(err) = run_generate(material) {
+        println!("Generating {}", material_str);
+        if let Err(err) = run_generate(material_key) {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("failed to generate {}: {}", material_str, err),
