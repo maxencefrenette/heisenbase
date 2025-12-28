@@ -21,7 +21,6 @@ use polars::{
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 
 const PGN_ROOT: &str = "./data/fishtest_pgns";
-const TOP_COUNT: usize = 50;
 const MAX_NON_PAWN: u32 = 5;
 const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
 const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
