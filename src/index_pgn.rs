@@ -54,6 +54,8 @@ pub fn run() -> io::Result<()> {
         total_games += game_count;
     }
 
+    let total_positions: u64 = counts_positions.values().sum();
+
     println!("Processed {total_games} games.");
 
     let mut entries: Vec<_> = counts_games.into_iter().collect();
@@ -74,7 +76,7 @@ pub fn run() -> io::Result<()> {
         );
     }
 
-    write_full_index(&entries, &counts_positions)?;
+    write_full_index(&entries, &counts_positions, total_games, total_positions)?;
 
     Ok(())
 }
@@ -120,16 +122,22 @@ fn process_reader<R: Read>(
 fn write_full_index(
     entries: &[(MaterialKey, u64)],
     counts_positions: &HashMap<MaterialKey, u64>,
+    total_games: u64,
+    total_positions: u64,
 ) -> io::Result<()> {
     let mut material_keys = Vec::with_capacity(entries.len());
     let mut counts_games = Vec::with_capacity(entries.len());
     let mut counts_positions_vec = Vec::with_capacity(entries.len());
     let mut material_key_size = Vec::with_capacity(entries.len());
+    let mut total_games_vec = Vec::with_capacity(entries.len());
+    let mut total_positions_vec = Vec::with_capacity(entries.len());
     for (key, count_games) in entries {
         material_keys.push(key.to_string());
         counts_games.push(*count_games);
         counts_positions_vec.push(*counts_positions.get(key).unwrap_or(&0));
         material_key_size.push(PositionIndexer::new(key.clone()).total_positions() as u64);
+        total_games_vec.push(total_games);
+        total_positions_vec.push(total_positions);
     }
 
     if let Some(parent) = Path::new(PARQUET_PATH).parent() {
@@ -141,6 +149,8 @@ fn write_full_index(
         Series::new("material_key_size", material_key_size),
         Series::new("num_games", counts_games),
         Series::new("num_positions", counts_positions_vec),
+        Series::new("total_games", total_games_vec),
+        Series::new("total_positions", total_positions_vec),
     ])
     .map_err(polars_to_io_error)?;
 
