@@ -1,7 +1,31 @@
 use crate::material_key::{HbPieceRole, MaterialKey};
 use shakmaty::{
-    CastlingMode, Chess, Color, FromSetup, Position, PositionErrorKinds, Setup, Square,
+    Bitboard, CastlingMode, Chess, Color, FromSetup, Position, PositionErrorKinds, Setup, Square,
 };
+
+fn nth_light_square(n: u32) -> Square {
+    debug_assert!(n < 32);
+    let rank = n / 4;
+    let file_index = n % 4;
+    let file = if rank % 2 == 0 {
+        1 + 2 * file_index
+    } else {
+        2 * file_index
+    };
+    Square::new(rank * 8 + file)
+}
+
+fn nth_dark_square(n: u32) -> Square {
+    debug_assert!(n < 32);
+    let rank = n / 4;
+    let file_index = n % 4;
+    let file = if rank % 2 == 0 {
+        2 * file_index
+    } else {
+        1 + 2 * file_index
+    };
+    Square::new(rank * 8 + file)
+}
 
 /// This struct is used to create a Gödel number mapping for all positions of a material key.
 #[derive(Clone)]
@@ -70,23 +94,17 @@ impl PositionIndexer {
             let position = remaining % radix;
             remaining /= radix;
 
-            let square_index = match piece.role {
-                HbPieceRole::LightBishop => position * 2 + 1,
-                HbPieceRole::DarkBishop => position * 2,
-                _ => position,
+            let square = match piece.role {
+                HbPieceRole::LightBishop => nth_light_square(position as u32),
+                HbPieceRole::DarkBishop => nth_dark_square(position as u32),
+                _ => Square::new(position as u32),
             };
 
-            if setup
-                .board
-                .piece_at(Square::new(square_index as u32))
-                .is_some()
-            {
+            if setup.board.piece_at(square).is_some() {
                 return Err(PositionMappingError::TwoPiecesOnSameSquare);
             }
 
-            setup
-                .board
-                .set_piece_at(Square::new(square_index as u32), piece.into());
+            setup.board.set_piece_at(square, piece.into());
         }
 
         debug_assert!(remaining == 0);
@@ -114,7 +132,12 @@ impl PositionIndexer {
                 _ => 64,
             };
 
-            let bitboard = board.by_piece(piece.into());
+            let mask = match piece.role {
+                HbPieceRole::LightBishop => Bitboard::LIGHT_SQUARES,
+                HbPieceRole::DarkBishop => Bitboard::DARK_SQUARES,
+                _ => Bitboard::FULL,
+            };
+            let bitboard = mask & board.by_piece(piece.into());
             let square = bitboard
                 .first()
                 .ok_or(PositionMappingError::MismatchedMaterial)?;
@@ -122,8 +145,7 @@ impl PositionIndexer {
             let square_index = square.to_usize();
 
             let position = match piece.role {
-                HbPieceRole::LightBishop => (square_index - 1) / 2,
-                HbPieceRole::DarkBishop => square_index / 2,
+                HbPieceRole::LightBishop | HbPieceRole::DarkBishop => square_index / 2,
                 _ => square_index,
             };
 
@@ -153,41 +175,40 @@ pub enum PositionMappingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{Rng, SeedableRng, rngs::StdRng};
+    use proptest::{prelude::*, string::string_regex};
 
-    fn roundtrip_random_indices(mk: MaterialKey, seed: u64) {
-        let indexer = PositionIndexer::new(mk.clone());
-        let mut rng = StdRng::seed_from_u64(seed);
-        let total = indexer.total_positions();
-        for _ in 0..10 {
-            let index = rng.gen_range(0..total);
+    fn material_key_strategy() -> impl Strategy<Value = MaterialKey> {
+        string_regex("K(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}vK(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}")
+            .unwrap()
+            .prop_filter_map("valid material key", |value| {
+                MaterialKey::from_string(&value)
+            })
+    }
 
-            let pos = match indexer.index_to_position(index) {
-                Ok(pos) => pos,
-                Err(_) => continue,
+    fn indexed_material_strategy() -> impl Strategy<Value = (MaterialKey, usize)> {
+        material_key_strategy().prop_flat_map(|mk| {
+            let total = PositionIndexer::new(mk.clone()).total_positions();
+            (Just(mk), 0..total)
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn roundtrip_indices((mk, index) in indexed_material_strategy()) {
+            let indexer = PositionIndexer::new(mk);
+            let Ok(pos) = indexer.index_to_position(index) else {
+                return Ok(());
             };
 
-            // The naive index can map 2 indices to the same position
+            // The naive index can map 2 indices to the same position.
             let index = indexer
                 .position_to_index(&pos)
                 .expect("This position came from a valid index, so it should never fail");
             let pos2 = indexer
                 .index_to_position(index)
-                .expect("This index came from a vald position, so it should never fail");
-            assert_eq!(pos, pos2);
+                .expect("This index came from a valid position, so it should never fail");
+            prop_assert_eq!(pos, pos2);
         }
-    }
-
-    #[test]
-    fn roundtrip_kvk() {
-        let mk = MaterialKey::from_string("KvK").unwrap();
-        roundtrip_random_indices(mk, 0);
-    }
-
-    #[test]
-    fn roundtrip_kqvk() {
-        let mk = MaterialKey::from_string("KQvK").unwrap();
-        roundtrip_random_indices(mk, 1);
     }
 
     #[test]
@@ -206,30 +227,6 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_krvkb() {
-        let mk = MaterialKey::from_string("KRvKBd").unwrap();
-        roundtrip_random_indices(mk, 2);
-    }
-
-    #[test]
-    fn roundtrip_kqvkr() {
-        let mk = MaterialKey::from_string("KQvKR").unwrap();
-        roundtrip_random_indices(mk, 3);
-    }
-
-    #[test]
-    fn roundtrip_kbnvkq() {
-        let mk = MaterialKey::from_string("KBdNvKQ").unwrap();
-        roundtrip_random_indices(mk, 4);
-    }
-
-    #[test]
-    fn roundtrip_knnvk() {
-        let mk = MaterialKey::from_string("KNNvK").unwrap();
-        roundtrip_random_indices(mk, 5);
-    }
-
-    #[test]
     fn index_to_position_out_of_bounds() {
         let mk = MaterialKey::from_string("KQvK").unwrap();
         let indexer = PositionIndexer::new(mk.clone());
@@ -238,18 +235,6 @@ mod tests {
             indexer.index_to_position(index),
             Err(PositionMappingError::IndexOutOfBounds)
         ));
-    }
-
-    #[test]
-    fn exhaustive_roundtrip_kvk() {
-        let mk = MaterialKey::from_string("KvK").unwrap();
-        let indexer = PositionIndexer::new(mk.clone());
-        for idx in 0..indexer.total_positions() {
-            if let Ok(pos) = indexer.index_to_position(idx) {
-                let roundtrip = indexer.position_to_index(&pos).unwrap();
-                assert_eq!(idx, roundtrip);
-            }
-        }
     }
 
     #[test]

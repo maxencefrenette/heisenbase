@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 50b8df2e3e84f8647c162fe716c25566900afe1a6201ebdf5193745bcf87b240 # shrinks to (mk, index) = (MaterialKey { counts: [[1, 0, 0, 0, 1, 0], [1, 0, 0, 1, 1, 0]], pawns: PawnStructure(ByColor { black: . . . . . . . . . . 1 . . . . . . . . . . . . . . . . . . . 1 . . . . . . . 1 . . . . . . . . . . . . . . . . . . . . . . . . . , white: . . . . . . . . . . . . . . . . . . . . . . . . . . . 1 . 1 . . . . . . . . . . . . . . . . . . . . . . 1 . . . . . . . . . . .  }) }, 7093146)
