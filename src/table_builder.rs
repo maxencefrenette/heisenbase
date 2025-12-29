@@ -5,7 +5,7 @@ use crate::wdl_file::read_wdl_file;
 use crate::wdl_score_range::WdlScoreRange;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use shakmaty::{Chess, Move, Position};
+use shakmaty::{Chess, Move, Position, Role};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -165,8 +165,9 @@ impl TableBuilder {
         child_position.play_unchecked(mv);
 
         let is_promotion = mv.promotion().is_some();
+        let is_pawn_move = mv.role() == Role::Pawn;
 
-        if !mv.is_capture() && !is_promotion {
+        if !mv.is_capture() && !is_promotion && !is_pawn_move {
             let child_index = self
                 .position_indexer
                 .position_to_index(&child_position)
@@ -218,7 +219,7 @@ mod tests {
     use crate::wdl_file::write_wdl_file;
     use crate::wdl_score_range::WdlScoreRange;
     use crate::wdl_table::WdlTable;
-    use shakmaty::{CastlingMode, fen::Fen};
+    use shakmaty::{CastlingMode, Role, Square, fen::Fen};
     use std::collections::HashMap;
     use std::fs;
     use std::path::PathBuf;
@@ -375,6 +376,40 @@ mod tests {
         assert!(tb.child_indexers.contains_key(&kvk_wdl_table.material));
 
         fs::remove_file(path).unwrap();
+        fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn pawn_move_uses_child_table() {
+        let material = MaterialKey::from_string("Ka2vK").unwrap();
+        let data_dir = temp_data_dir("pawn_move_child");
+
+        let child_key = MaterialKey::from_string("Ka3vK").unwrap();
+        let child_indexer = PositionIndexer::new(child_key.clone());
+        let positions = vec![WdlScoreRange::Draw; child_indexer.total_positions()];
+        let child_table = WdlTable {
+            material: child_key,
+            positions,
+        };
+        let child_path = data_dir.join("Ka3vK.hbt");
+        write_wdl_file(&child_path, &child_table).unwrap();
+
+        let tb = TableBuilder::new_with_data_dir(material, &data_dir);
+
+        let position: Chess = "8/8/8/8/8/8/P7/K6k w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+
+        let pawn_move = position
+            .legal_moves()
+            .into_iter()
+            .find(|mv| mv.role() == Role::Pawn && mv.to() == Square::A3)
+            .expect("expected a2a3 pawn move");
+        let result = tb.evaluate_move(&tb.positions, &position, pawn_move);
+        assert_eq!(result, DtzScoreRange::draw());
+
         fs::remove_dir_all(data_dir).unwrap();
     }
 }

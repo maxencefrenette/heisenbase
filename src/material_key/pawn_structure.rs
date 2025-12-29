@@ -52,7 +52,6 @@ impl PawnStructure {
         })
     }
 
-    #[cfg(test)]
     pub fn to_board(&self) -> Board {
         use shakmaty::{ByColor, ByRole, Role};
 

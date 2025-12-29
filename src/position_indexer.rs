@@ -1,6 +1,7 @@
 use crate::material_key::{HbPieceRole, MaterialKey};
 use shakmaty::{
-    Bitboard, CastlingMode, Chess, Color, FromSetup, Position, PositionErrorKinds, Setup, Square,
+    Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, PositionErrorKinds, Role,
+    Setup, Square,
 };
 
 fn nth_light_square(n: u32) -> Square {
@@ -84,6 +85,7 @@ impl PositionIndexer {
 
         let mut setup = Setup::empty();
         setup.turn = turn;
+        setup.board = self.material_key.pawns.to_board();
 
         for piece in self.material_key.pieces() {
             let radix = match piece.role {
@@ -114,6 +116,15 @@ impl PositionIndexer {
     }
 
     pub fn position_to_index(&self, position: &Chess) -> Result<usize, PositionMappingError> {
+        let board = position.board();
+        let white_pawns = board.pawns() & board.white();
+        let black_pawns = board.pawns() & board.black();
+        if white_pawns != self.material_key.pawns.0.white
+            || black_pawns != self.material_key.pawns.0.black
+        {
+            return Err(PositionMappingError::MismatchedMaterial);
+        }
+
         let mut index = 0;
         let mut multiplier = 1;
 
@@ -263,6 +274,43 @@ mod tests {
         let pos = Chess::from_setup(setup, CastlingMode::Standard).unwrap();
         assert!(matches!(
             indexer.position_to_index(&pos),
+            Err(PositionMappingError::MismatchedMaterial)
+        ));
+    }
+
+    #[test]
+    fn position_with_pawn_roundtrips() {
+        use shakmaty::{CastlingMode, Square, fen::Fen};
+
+        let mk = MaterialKey::from_string("Ka2vK").unwrap();
+        let indexer = PositionIndexer::new(mk);
+        let position = "8/8/8/8/8/8/P7/K6k w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+
+        let index = indexer.position_to_index(&position).unwrap();
+        let reconstructed = indexer.index_to_position(index).unwrap();
+        let board = reconstructed.board();
+        assert!(board.pawns().contains(Square::A2));
+        assert!(board.white().contains(Square::A2));
+    }
+
+    #[test]
+    fn position_to_index_rejects_missing_pawn() {
+        use shakmaty::{CastlingMode, fen::Fen};
+
+        let mk = MaterialKey::from_string("Ka2vK").unwrap();
+        let indexer = PositionIndexer::new(mk);
+        let position = "8/8/8/8/8/8/8/K6k w - - 0 1"
+            .parse::<Fen>()
+            .unwrap()
+            .into_position(CastlingMode::Standard)
+            .unwrap();
+
+        assert!(matches!(
+            indexer.position_to_index(&position),
             Err(PositionMappingError::MismatchedMaterial)
         ));
     }
