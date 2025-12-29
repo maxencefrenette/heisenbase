@@ -1,5 +1,6 @@
+use duckdb::{Connection, params};
 use polars::prelude::*;
-use std::{error::Error, io, path::Path};
+use std::{error::Error, fs, io, path::Path};
 
 use super::index_pgn;
 use heisenbase::material_key::MaterialKey;
@@ -61,10 +62,70 @@ pub(crate) fn run_generate(material: MaterialKey) -> io::Result<()> {
         };
         println!("{variant:?}: {percentage:.2}%");
     }
-    let filename = format!("./data/heisenbase/{}.hbt", wdl_table.material);
+    let heisenbase_dir = Path::new("./data/heisenbase");
+    fs::create_dir_all(heisenbase_dir)?;
+    let filename = heisenbase_dir.join(format!("{}.hbt", wdl_table.material));
     write_wdl_file(&filename, &wdl_table)?;
-    println!("Wrote table to {}", filename);
+    log_stats_to_index(&wdl_table, &counts)
+        .map_err(|err| io::Error::other(format!("index logging failed: {err}")))?;
+    println!("Wrote table to {}", filename.display());
     println!();
+    Ok(())
+}
+
+fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<(), Box<dyn Error>> {
+    let heisenbase_dir = Path::new("./data/heisenbase");
+    fs::create_dir_all(heisenbase_dir)?;
+
+    let mut children: Vec<String> = wdl_table
+        .material
+        .child_material_keys()
+        .into_iter()
+        .map(|key| key.to_string())
+        .collect();
+    children.sort();
+
+    let name = wdl_table.material.to_string();
+    let total = wdl_table.positions.len() as i64;
+    let children_literal = if children.is_empty() {
+        "[]".to_string()
+    } else {
+        let items = children
+            .iter()
+            .map(|child| format!("'{}'", child.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{}]", items)
+    };
+
+    let conn = Connection::open(heisenbase_dir.join("index.duckdb"))?;
+    conn.execute("DELETE FROM material_keys WHERE name = ?", params![name])?;
+    let insert_sql = format!(
+        "INSERT INTO material_keys (
+            name,
+            children,
+            total,
+            illegal,
+            win,
+            draw,
+            loss,
+            win_or_draw,
+            draw_or_loss,
+            unknown
+        ) VALUES ('{}', {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        name.replace('\'', "''"),
+        children_literal,
+        total,
+        counts[WdlScoreRange::IllegalPosition as usize],
+        counts[WdlScoreRange::Win as usize],
+        counts[WdlScoreRange::Draw as usize],
+        counts[WdlScoreRange::Loss as usize],
+        counts[WdlScoreRange::WinOrDraw as usize],
+        counts[WdlScoreRange::DrawOrLoss as usize],
+        counts[WdlScoreRange::Unknown as usize],
+    );
+    conn.execute(&insert_sql, [])?;
+
     Ok(())
 }
 
