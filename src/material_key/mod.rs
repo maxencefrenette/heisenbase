@@ -568,6 +568,7 @@ mod tests {
 
         assert_debug_snapshot!(children, @r#"
         [
+            "KNvK",
             "Ke5vKN",
             "Ke4vK",
             "Kf5vK",
@@ -603,6 +604,7 @@ mod tests {
 
         assert_debug_snapshot!(children, @r#"
         [
+            "KBdvK",
             "KBld4vK",
             "Kd3vK",
         ]

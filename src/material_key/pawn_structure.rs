@@ -64,10 +64,13 @@ impl PawnStructure {
         Board::try_from_bitboards(by_role, by_color).unwrap()
     }
 
-    /// Returns the pawn structures that can be reached from this pawn structure by moving a pawn,
-    /// without capturing or promoting a piece.
+    /// Returns the pawn structures that can be reached from this pawn structure without changing the piece count.
+    ///
+    /// This includes:
+    /// - Moving a pawn one or two squares forward.
+    /// - Capturing a pawn with a piece (removes a pawn from the board)
     pub fn child_pawn_structures_no_piece_change(&self) -> Vec<PawnStructure> {
-        fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
+        fn one_sided_pushes(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
             let can_be_moved_one_square = (Bitboard::FULL
                 .without(Bitboard::BACKRANKS)
                 .without(Bitboard::from_rank(Rank::Seventh)))
@@ -122,8 +125,16 @@ impl PawnStructure {
                 }))
         }
 
-        one_sided(self)
-            .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
+        let pawn_captured_by_a_piece = self.occupied().into_iter().map(|square| {
+            Self(ByColor {
+                white: self.0.white.without(square),
+                black: self.0.black.without(square),
+            })
+        });
+
+        pawn_captured_by_a_piece
+            .chain(one_sided_pushes(self))
+            .chain(one_sided_pushes(&self.flip_sides()).map(|ps| ps.flip_sides()))
             .collect()
     }
 
@@ -256,6 +267,24 @@ mod tests {
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . p . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
             . . . . P . . .
             . . . . . . . .
             . . . . . . . .
@@ -312,7 +341,28 @@ mod tests {
                 .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
-                .collect::<Vec<Board>>(), @"[]"
+                .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
+        ]
+        "
         );
     }
 
@@ -339,6 +389,24 @@ mod tests {
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . p . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . P . . .
+            . . . . . . . .
+            ,
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -385,6 +453,24 @@ mod tests {
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
         [
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . p . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . P . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
             . . . . . . . .
             . . . . . . . .
             . . . . . . . .
@@ -447,7 +533,28 @@ mod tests {
                 .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
-            .collect::<Vec<Board>>(), @"[]"
+            .collect::<Vec<Board>>(), @"
+        [
+            . . . . . . . .
+            P . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            ,
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . .
+            . . . . . . . p
+            . . . . . . . .
+            ,
+        ]
+        "
         );
     }
 
@@ -643,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn child_pawn_structures_single_pawn() {
+    fn child_pawn_structures_no_promotion_possible() {
         let parent = PawnStructure::new(Bitboard::from_square(Square::D3), Bitboard::EMPTY);
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
