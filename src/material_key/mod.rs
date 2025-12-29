@@ -611,4 +611,14 @@ mod tests {
         let key = MaterialKey::from_position(&position).unwrap();
         assert_eq!(key.to_string(), "Kd2vK");
     }
+
+    #[test]
+    fn non_pawn_piece_count_includes_kings() {
+        assert_eq!(
+            MaterialKey::from_string("KQvK")
+                .unwrap()
+                .non_pawn_piece_count(),
+            3
+        );
+    }
 }
