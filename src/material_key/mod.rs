@@ -281,7 +281,7 @@ impl MaterialKey {
         // Simple pawn moves
         children.extend(
             self.pawns
-                .child_pawn_structures_no_piece_changes()
+                .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| MaterialKey::new(self.counts, ps)),
         );
@@ -302,7 +302,7 @@ impl MaterialKey {
             children.extend(
                 iproduct!(
                     once(self.pawns.clone())
-                        .chain(self.pawns.child_pawn_structures_with_piece_captures(color)),
+                        .chain(self.pawns.child_pawn_structures_with_piece_capture(color)),
                     HbPieceRole::CAPTURABLE,
                 )
                 .filter_map(|(ps, role)| {
@@ -319,7 +319,7 @@ impl MaterialKey {
             // Promotions without piece captures
             children.extend(
                 iproduct!(
-                    self.pawns.child_pawn_structures_with_promotions(color),
+                    self.pawns.child_pawn_structures_with_promotion(color),
                     HbPieceRole::CAPTURABLE,
                 )
                 .filter_map(|(ps, role)| {
@@ -336,7 +336,7 @@ impl MaterialKey {
             // Promotions with piece captures
             children.extend(
                 iproduct!(
-                    self.pawns.child_pawn_structures_with_promotions(color),
+                    self.pawns.child_pawn_structures_with_promotion(color),
                     HbPieceRole::CAPTURABLE,
                     HbPieceRole::CAPTURABLE,
                 )

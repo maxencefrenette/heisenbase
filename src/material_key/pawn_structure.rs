@@ -67,7 +67,7 @@ impl PawnStructure {
 
     /// Returns the pawn structures that can be reached from this pawn structure by moving a pawn,
     /// without capturing or promoting a piece.
-    pub fn child_pawn_structures_no_piece_changes(&self) -> Vec<PawnStructure> {
+    pub fn child_pawn_structures_no_piece_change(&self) -> Vec<PawnStructure> {
         fn one_sided(ps: &PawnStructure) -> impl Iterator<Item = PawnStructure> {
             let can_be_moved_one_square = (Bitboard::FULL
                 .without(Bitboard::BACKRANKS)
@@ -130,7 +130,7 @@ impl PawnStructure {
 
     /// Returns the pawn structures that can be reached from this pawn structure when `color` makes a move
     /// by capturing a piece with a pawn without promoting a pawn.
-    pub fn child_pawn_structures_with_piece_captures(&self, color: Color) -> Vec<PawnStructure> {
+    pub fn child_pawn_structures_with_piece_capture(&self, color: Color) -> Vec<PawnStructure> {
         let from_color_perspective = match color {
             Color::White => self,
             Color::Black => &self.flip_sides(),
@@ -167,8 +167,11 @@ impl PawnStructure {
     }
 
     /// Returns the pawn structures that can be reached from this pawn structure when `color` promotes a pawn.
+    ///
+    /// Since the backrank is always free of pawns, we don't need to differentiate between promoting with or without
+    /// piece captures. They are the same set of child pawn structures.
     #[allow(dead_code)]
-    pub fn child_pawn_structures_with_promotions(&self, color: Color) -> Vec<PawnStructure> {
+    pub fn child_pawn_structures_with_promotion(&self, color: Color) -> Vec<PawnStructure> {
         let from_color_perspective = match color {
             Color::White => self,
             Color::Black => &self.flip_sides(),
@@ -224,7 +227,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_no_piece_changes()
+                .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"[]"
@@ -247,7 +250,7 @@ mod tests {
         . . . . P . . .
         . . . . . . . .
         ");
-        assert_debug_snapshot!(parent.child_pawn_structures_no_piece_changes().into_iter().map(|ps| ps.to_board()).collect::<Vec<Board>>(), @"
+        assert_debug_snapshot!(parent.child_pawn_structures_no_piece_change().into_iter().map(|ps| ps.to_board()).collect::<Vec<Board>>(), @"
         [
             . . . . . . . .
             . . . . p . . .
@@ -307,7 +310,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_no_piece_changes()
+                .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"[]"
@@ -332,7 +335,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_no_piece_changes()
+                .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -378,7 +381,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_no_piece_changes()
+                .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -442,7 +445,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_no_piece_changes()
+                .child_pawn_structures_no_piece_change()
                 .into_iter()
                 .map(|ps| ps.to_board())
             .collect::<Vec<Board>>(), @"[]"
@@ -467,7 +470,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_piece_captures(Color::White)
+                .child_pawn_structures_with_piece_capture(Color::White)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -513,7 +516,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_piece_captures(Color::White)
+                .child_pawn_structures_with_piece_capture(Color::White)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"[]"
@@ -538,7 +541,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_piece_captures(Color::Black)
+                .child_pawn_structures_with_piece_capture(Color::Black)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -584,7 +587,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_promotions(Color::White)
+                .child_pawn_structures_with_promotion(Color::White)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -621,7 +624,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_promotions(Color::Black)
+                .child_pawn_structures_with_promotion(Color::Black)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"
@@ -655,7 +658,7 @@ mod tests {
         ");
         assert_debug_snapshot!(
             parent
-                .child_pawn_structures_with_promotions(Color::Black)
+                .child_pawn_structures_with_promotion(Color::Black)
                 .into_iter()
                 .map(|ps| ps.to_board())
                 .collect::<Vec<Board>>(), @"[]"
