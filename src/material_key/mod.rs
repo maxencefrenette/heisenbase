@@ -228,6 +228,7 @@ impl MaterialKey {
     /// Mirror the sides of the board (white-to-black and black-to-white)
     fn mirror_sides(&mut self) {
         self.counts.swap(0, 1);
+        self.pawns = self.pawns.flip_sides();
     }
 
     /// Determines which color has the stronger material based on piece counts.
@@ -476,10 +477,31 @@ impl fmt::Display for MaterialKey {
 mod tests {
     use super::*;
     use insta::assert_debug_snapshot;
+    use proptest::{prelude::*, string::string_regex};
     use shakmaty::{CastlingMode, fen::Fen};
 
     fn material_key(s: &str) -> String {
         MaterialKey::from_string(s).unwrap().to_string()
+    }
+
+    fn material_key_string_strategy() -> impl Strategy<Value = String> {
+        string_regex("K(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}vK(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}")
+            .unwrap()
+            .prop_filter("valid material key", |value| {
+                MaterialKey::from_string(value).is_some()
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn roundtrip_parsing(key in material_key_string_strategy()) {
+            let parsed = MaterialKey::from_string(&key).expect("filtered to valid material keys");
+            let rendered = parsed.to_string();
+            let reparsed = MaterialKey::from_string(&rendered)
+                .expect("rendered material keys should parse");
+            prop_assert_eq!(&parsed, &reparsed);
+            prop_assert_eq!(rendered, reparsed.to_string());
+        }
     }
 
     #[test]
@@ -510,12 +532,6 @@ mod tests {
     #[test]
     fn rejects_missing_separator() {
         assert!(MaterialKey::from_string("KQK").is_none());
-    }
-
-    #[test]
-    fn parses_kd2vkh7() {
-        let key = MaterialKey::from_string("Kd2vKh7").unwrap();
-        assert_eq!(key.to_string(), "Kd2vKh7");
     }
 
     #[test]
