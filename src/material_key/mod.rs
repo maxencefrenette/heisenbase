@@ -11,12 +11,12 @@ pub use hb_piece::{HbPiece, HbPieceRole};
 /// Represents a material configuration, e.g. `KQvK`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MaterialKey {
+    pub pawns: PawnStructure,
     /// Piece counts indexed by color then piece descriptor.
     /// By convention the strong side is encoded as white when pawn structures
     /// are symmetric under a vertical flip; otherwise pawn-structure ordering
     /// takes precedence and the stronger side may appear second.
     pub counts: [[u8; HbPieceRole::ALL.len()]; 2],
-    pub pawns: PawnStructure,
 }
 
 impl MaterialKey {
