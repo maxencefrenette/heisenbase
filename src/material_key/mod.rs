@@ -365,6 +365,8 @@ impl MaterialKey {
             );
         }
 
+        children.sort_unstable();
+        children.dedup();
         children
     }
 
@@ -569,10 +571,10 @@ mod tests {
         assert_debug_snapshot!(children, @r#"
         [
             "KNvK",
-            "Ke5vKN",
             "Ke4vK",
-            "Kf5vK",
             "Kd5vK",
+            "Ke5vKN",
+            "Kf5vK",
         ]
         "#);
     }
@@ -605,8 +607,8 @@ mod tests {
         assert_debug_snapshot!(children, @r#"
         [
             "KBdvK",
-            "KBld4vK",
             "Kd3vK",
+            "KBld4vK",
         ]
         "#);
     }
