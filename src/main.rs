@@ -227,7 +227,7 @@ fn heisenbase_allows(wdl: WdlScoreRange, syzygy: SimpleWdl) -> bool {
         WdlScoreRange::Loss => syzygy == SimpleWdl::Loss,
         WdlScoreRange::WinOrDraw => matches!(syzygy, SimpleWdl::Win | SimpleWdl::Draw),
         WdlScoreRange::DrawOrLoss => matches!(syzygy, SimpleWdl::Draw | SimpleWdl::Loss),
-        WdlScoreRange::Unknown => false,
+        WdlScoreRange::Unknown => true,
         WdlScoreRange::IllegalPosition => false,
     }
 }
