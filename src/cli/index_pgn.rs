@@ -1,5 +1,5 @@
 /// Contains the code to index PGN files to find the most common material keys.
-/// Stores the results in a Parquet file.
+/// Stores the results in Parquet files.
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -16,7 +16,9 @@ use heisenbase::position_indexer::PositionIndexer;
 use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
 use polars::{
     error::PolarsError,
-    prelude::{DataFrame, NamedFrom, ParquetWriter, Series},
+    prelude::{
+        DataFrame, DataType, IntoLazy, LazyFrame, NamedFrom, ParquetWriter, Series, col, lit,
+    },
 };
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 
@@ -26,9 +28,10 @@ const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
 const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
 const INVALID_FEN_POSITION_PREFIX: &str = "invalid FEN position:";
 const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
+pub const RAW_PARQUET_PATH: &str = "./data/pgn_index_raw.parquet";
 pub const PARQUET_PATH: &str = "./data/pgn_index.parquet";
 
-pub fn run() -> io::Result<()> {
+pub fn run_stage1() -> io::Result<()> {
     let mut files = Vec::new();
     collect_pgn_files(Path::new(PGN_ROOT), &mut files)?;
     files.sort();
@@ -66,7 +69,41 @@ pub fn run() -> io::Result<()> {
     let mut entries: Vec<_> = counts_games.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-    write_full_index(&entries, &counts_positions, total_games, total_positions)?;
+    write_raw_index(&entries, &counts_positions, total_games, total_positions)?;
+
+    Ok(())
+}
+
+pub fn run_stage2() -> io::Result<()> {
+    let mut df = LazyFrame::scan_parquet(RAW_PARQUET_PATH, Default::default())
+        .map_err(polars_to_io_error)?
+        .filter(col("num_games").gt(1))
+        .collect()
+        .map_err(polars_to_io_error)?;
+
+    let sizes = material_key_sizes(&df)?;
+    df.with_column(Series::new("material_key_size", sizes))
+        .map_err(polars_to_io_error)?;
+
+    let mut df = df
+        .lazy()
+        .with_columns([
+            (lit(1_000_000_000f64) * col("num_positions").cast(DataType::Float64)
+                / col("total_positions").cast(DataType::Float64)
+                / col("material_key_size").cast(DataType::Float64))
+            .alias("utility"),
+        ])
+        .collect()
+        .map_err(polars_to_io_error)?;
+
+    if let Some(parent) = Path::new(PARQUET_PATH).parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let file = File::create(PARQUET_PATH)?;
+    ParquetWriter::new(file)
+        .finish(&mut df)
+        .map_err(polars_to_io_error)?;
 
     Ok(())
 }
@@ -111,7 +148,7 @@ fn process_reader<R: Read>(
     Ok(visitor.games)
 }
 
-fn write_full_index(
+fn write_raw_index(
     entries: &[(MaterialKey, u64)],
     counts_positions: &HashMap<MaterialKey, u64>,
     total_games: u64,
@@ -120,25 +157,22 @@ fn write_full_index(
     let mut material_keys = Vec::with_capacity(entries.len());
     let mut counts_games = Vec::with_capacity(entries.len());
     let mut counts_positions_vec = Vec::with_capacity(entries.len());
-    let mut material_key_size = Vec::with_capacity(entries.len());
     let mut total_games_vec = Vec::with_capacity(entries.len());
     let mut total_positions_vec = Vec::with_capacity(entries.len());
     for (key, count_games) in entries {
         material_keys.push(key.to_string());
         counts_games.push(*count_games);
         counts_positions_vec.push(*counts_positions.get(key).unwrap_or(&0));
-        material_key_size.push(PositionIndexer::new(key.clone()).total_positions() as u64);
         total_games_vec.push(total_games);
         total_positions_vec.push(total_positions);
     }
 
-    if let Some(parent) = Path::new(PARQUET_PATH).parent() {
+    if let Some(parent) = Path::new(RAW_PARQUET_PATH).parent() {
         fs::create_dir_all(parent)?;
     }
 
     let mut df = DataFrame::new(vec![
         Series::new("material_key", material_keys),
-        Series::new("material_key_size", material_key_size),
         Series::new("num_games", counts_games),
         Series::new("num_positions", counts_positions_vec),
         Series::new("total_games", total_games_vec),
@@ -146,12 +180,30 @@ fn write_full_index(
     ])
     .map_err(polars_to_io_error)?;
 
-    let file = File::create(PARQUET_PATH)?;
+    let file = File::create(RAW_PARQUET_PATH)?;
     ParquetWriter::new(file)
         .finish(&mut df)
         .map_err(polars_to_io_error)?;
 
     Ok(())
+}
+
+fn material_key_sizes(df: &DataFrame) -> io::Result<Vec<u64>> {
+    let keys = df.column("material_key").map_err(polars_to_io_error)?;
+    let keys = keys.str().map_err(polars_to_io_error)?;
+    let mut sizes = Vec::with_capacity(keys.len());
+    for key in keys.into_iter() {
+        let key =
+            key.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "material_key is null"))?;
+        let material = MaterialKey::from_string(key).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid material_key: {key}"),
+            )
+        })?;
+        sizes.push(PositionIndexer::new(material).total_positions() as u64);
+    }
+    Ok(sizes)
 }
 
 fn polars_to_io_error(err: PolarsError) -> io::Error {

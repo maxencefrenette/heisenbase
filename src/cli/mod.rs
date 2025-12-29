@@ -35,8 +35,10 @@ enum Commands {
         #[arg(long, required = true)]
         max_pieces: u32,
     },
-    /// Index PGN files to find the most common material keys.
-    IndexPgn,
+    /// Index fishtest PGN files into pgn_index_raw.parquet.
+    PgnIndexStage1,
+    /// Build the filtered PGN index with derived columns.
+    PgnIndexStage2,
     /// Sample positions from heisenbase tables and compare against Syzygy WDL tables.
     CheckAgainstSyzygy,
 }
@@ -57,8 +59,11 @@ pub fn run() -> Result<(), String> {
             generate::run_generate_many(min_games, max_pieces)
                 .map_err(|err| format!("generate-many failed: {err}"))?;
         }
-        Commands::IndexPgn => {
-            index_pgn::run().map_err(|err| format!("index-pgn failed: {err}"))?;
+        Commands::PgnIndexStage1 => {
+            index_pgn::run_stage1().map_err(|err| format!("pgn-index-stage1 failed: {err}"))?;
+        }
+        Commands::PgnIndexStage2 => {
+            index_pgn::run_stage2().map_err(|err| format!("pgn-index-stage2 failed: {err}"))?;
         }
         Commands::CheckAgainstSyzygy => {
             run_check_against_syzygy()
