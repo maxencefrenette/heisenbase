@@ -95,6 +95,9 @@ impl MaterialKey {
                         i += 2;
                     }
                     b'a'..=b'h' => {
+                        if i + 1 >= bytes.len() {
+                            return None;
+                        }
                         let square = Square::from_ascii(&bytes[i..i + 2]).ok()?;
                         if occupied.contains(square) {
                             return None;
@@ -547,6 +550,11 @@ mod tests {
     #[test]
     fn rejects_empty_string() {
         assert!(MaterialKey::from_string("").is_none());
+    }
+
+    #[test]
+    fn rejects_incomplete_pawn_square() {
+        assert!(MaterialKey::from_string("KavK").is_none());
     }
 
     #[test]
