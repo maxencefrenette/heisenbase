@@ -319,7 +319,7 @@ impl MaterialKey {
             // Promotions without piece captures
             children.extend(
                 iproduct!(
-                    self.pawns.child_pawn_structures_with_piece_captures(color),
+                    self.pawns.child_pawn_structures_with_promotions(color),
                     HbPieceRole::CAPTURABLE,
                 )
                 .filter_map(|(ps, role)| {
@@ -336,7 +336,7 @@ impl MaterialKey {
             // Promotions with piece captures
             children.extend(
                 iproduct!(
-                    self.pawns.child_pawn_structures_with_piece_captures(color),
+                    self.pawns.child_pawn_structures_with_promotions(color),
                     HbPieceRole::CAPTURABLE,
                     HbPieceRole::CAPTURABLE,
                 )
@@ -565,6 +565,23 @@ mod tests {
         assert_debug_snapshot!(children, @r#"
         [
             "KvK",
+        ]
+        "#);
+    }
+
+    #[test]
+    fn child_material_keys_for_kbld3vk() {
+        let key = MaterialKey::from_string("KBld3vK").unwrap();
+        let children = key
+            .child_material_keys()
+            .into_iter()
+            .map(|k| k.to_string())
+            .collect::<Vec<String>>();
+
+        assert_debug_snapshot!(children, @r#"
+        [
+            "KBld4vK",
+            "Kd3vK",
         ]
         "#);
     }

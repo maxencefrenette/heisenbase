@@ -639,4 +639,26 @@ mod tests {
         "
         );
     }
+
+    #[test]
+    fn child_pawn_structures_single_pawn() {
+        let parent = PawnStructure::new(Bitboard::from_square(Square::D3), Bitboard::EMPTY);
+        assert_debug_snapshot!(parent.to_board(), @"
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . . . . . .
+        . . . P . . . .
+        . . . . . . . .
+        . . . . . . . .
+        ");
+        assert_debug_snapshot!(
+            parent
+                .child_pawn_structures_with_promotions(Color::Black)
+                .into_iter()
+                .map(|ps| ps.to_board())
+                .collect::<Vec<Board>>(), @"[]"
+        );
+    }
 }
