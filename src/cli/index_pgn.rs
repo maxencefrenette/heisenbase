@@ -17,7 +17,8 @@ use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
 use polars::{
     error::PolarsError,
     prelude::{
-        DataFrame, DataType, IntoLazy, LazyFrame, NamedFrom, ParquetWriter, Series, col, lit,
+        DataFrame, DataType, GetOutput, IntoSeries, LazyFrame, NamedFrom, NewChunkedArray,
+        ParquetWriter, Series, UInt32Chunked, UInt64Chunked, col, lit,
     },
 };
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
@@ -78,15 +79,101 @@ pub fn run_stage2() -> io::Result<()> {
     let mut df = LazyFrame::scan_parquet(RAW_PARQUET_PATH, Default::default())
         .map_err(polars_to_io_error)?
         .filter(col("num_games").gt(1))
-        .collect()
-        .map_err(polars_to_io_error)?;
-
-    let sizes = material_key_sizes(&df)?;
-    df.with_column(Series::new("material_key_size", sizes))
-        .map_err(polars_to_io_error)?;
-
-    let mut df = df
-        .lazy()
+        .with_column(
+            col("material_key")
+                .map(
+                    |s| {
+                        let keys = s.str()?;
+                        let mut sizes = Vec::with_capacity(keys.len());
+                        for key in keys.into_iter() {
+                            let key = key.ok_or_else(|| {
+                                PolarsError::ComputeError("material_key is null".into())
+                            })?;
+                            let size = material_key_size(key)
+                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
+                            sizes.push(Some(size));
+                        }
+                        Ok(Some(
+                            UInt64Chunked::from_iter_options(
+                                "material_key_size",
+                                sizes.into_iter(),
+                            )
+                            .into_series(),
+                        ))
+                    },
+                    GetOutput::from_type(DataType::UInt64),
+                )
+                .alias("material_key_size"),
+        )
+        .with_column(
+            col("material_key")
+                .map(
+                    |s| {
+                        let keys = s.str()?;
+                        let mut counts = Vec::with_capacity(keys.len());
+                        for key in keys.into_iter() {
+                            let key = key.ok_or_else(|| {
+                                PolarsError::ComputeError("material_key is null".into())
+                            })?;
+                            let count = material_key_num_pieces(key)
+                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
+                            counts.push(Some(count));
+                        }
+                        Ok(Some(
+                            UInt32Chunked::from_iter_options("num_pieces", counts.into_iter())
+                                .into_series(),
+                        ))
+                    },
+                    GetOutput::from_type(DataType::UInt32),
+                )
+                .alias("num_pieces"),
+        )
+        .with_column(
+            col("material_key")
+                .map(
+                    |s| {
+                        let keys = s.str()?;
+                        let mut counts = Vec::with_capacity(keys.len());
+                        for key in keys.into_iter() {
+                            let key = key.ok_or_else(|| {
+                                PolarsError::ComputeError("material_key is null".into())
+                            })?;
+                            let count = material_key_num_pawns(key)
+                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
+                            counts.push(Some(count));
+                        }
+                        Ok(Some(
+                            UInt32Chunked::from_iter_options("num_pawns", counts.into_iter())
+                                .into_series(),
+                        ))
+                    },
+                    GetOutput::from_type(DataType::UInt32),
+                )
+                .alias("num_pawns"),
+        )
+        .with_column(
+            col("material_key")
+                .map(
+                    |s| {
+                        let keys = s.str()?;
+                        let mut counts = Vec::with_capacity(keys.len());
+                        for key in keys.into_iter() {
+                            let key = key.ok_or_else(|| {
+                                PolarsError::ComputeError("material_key is null".into())
+                            })?;
+                            let count = material_key_num_non_pawns(key)
+                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
+                            counts.push(Some(count));
+                        }
+                        Ok(Some(
+                            UInt32Chunked::from_iter_options("num_non_pawns", counts.into_iter())
+                                .into_series(),
+                        ))
+                    },
+                    GetOutput::from_type(DataType::UInt32),
+                )
+                .alias("num_non_pawns"),
+        )
         .with_columns([
             (lit(1_000_000_000f64) * col("num_positions").cast(DataType::Float64)
                 / col("total_positions").cast(DataType::Float64)
@@ -188,26 +275,37 @@ fn write_raw_index(
     Ok(())
 }
 
-fn material_key_sizes(df: &DataFrame) -> io::Result<Vec<u64>> {
-    let keys = df.column("material_key").map_err(polars_to_io_error)?;
-    let keys = keys.str().map_err(polars_to_io_error)?;
-    let mut sizes = Vec::with_capacity(keys.len());
-    for key in keys.into_iter() {
-        let key =
-            key.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "material_key is null"))?;
-        let material = MaterialKey::from_string(key).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid material_key: {key}"),
-            )
-        })?;
-        sizes.push(PositionIndexer::new(material).total_positions() as u64);
-    }
-    Ok(sizes)
-}
-
 fn polars_to_io_error(err: PolarsError) -> io::Error {
     io::Error::other(err.to_string())
+}
+
+fn material_key_size(key: &str) -> io::Result<u64> {
+    let material = parse_material_key(key)?;
+    Ok(PositionIndexer::new(material).total_positions() as u64)
+}
+
+fn material_key_num_pieces(key: &str) -> io::Result<u32> {
+    let material = parse_material_key(key)?;
+    Ok(material.total_piece_count())
+}
+
+fn material_key_num_pawns(key: &str) -> io::Result<u32> {
+    let material = parse_material_key(key)?;
+    Ok(material.pawns.pawn_count())
+}
+
+fn material_key_num_non_pawns(key: &str) -> io::Result<u32> {
+    let material = parse_material_key(key)?;
+    Ok(material.non_pawn_piece_count())
+}
+
+fn parse_material_key(key: &str) -> io::Result<MaterialKey> {
+    MaterialKey::from_string(key).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid material_key: {key}"),
+        )
+    })
 }
 
 struct IndexVisitor<'a> {
