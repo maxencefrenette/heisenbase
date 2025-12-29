@@ -29,7 +29,7 @@ def _():
     df.reset_index(drop=True, inplace=True)
 
     mo.md(f"Number of indexed material keys: {len(df):,}")
-    return alt, df
+    return alt, df, pd
 
 
 @app.cell
@@ -69,6 +69,41 @@ def _(chart1):
 @app.cell
 def _(chart1):
     chart1(1e12)
+    return
+
+
+@app.cell
+def _(chart1):
+    chart1(1e15)
+    return
+
+
+@app.cell
+def _(alt, df, pd):
+    import numpy as np
+
+    def downsample_equal_per_logbin(df, x, n_out, nbins=50, base=10, random_state=0):
+        d = df[df[x] > 0].copy()
+        logx = np.log(d[x].to_numpy()) / np.log(base)
+
+        bins = np.linspace(logx.min(), logx.max(), nbins + 1)
+        d["_bin"] = pd.cut(logx, bins=bins, include_lowest=True)
+
+        k = max(1, int(np.ceil(n_out / nbins)))
+
+        # shuffle once, then take first k per bin
+        d = d.sample(frac=1, random_state=random_state)
+        out = d.groupby("_bin", observed=True).head(k).drop(columns="_bin")
+
+        # trim if overshot
+        if len(out) > n_out:
+            out = out.sample(n_out, random_state=random_state)
+        return out
+
+    alt.Chart(downsample_equal_per_logbin(df, "cumulative_material_key_size", 1000, nbins=100)).mark_line().encode(
+        x=alt.X('cumulative_material_key_size', scale=alt.Scale(type='log')),
+        y=alt.Y('cumulative_positions', scale=alt.Scale(type='log')),
+    )
     return
 
 
