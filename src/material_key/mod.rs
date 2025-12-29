@@ -113,6 +113,11 @@ impl MaterialKey {
         push_pieces(&mut counts, &mut pawn_bitboards, &mut occupied, white, 0)?;
         push_pieces(&mut counts, &mut pawn_bitboards, &mut occupied, black, 1)?;
 
+        let king_idx = HbPieceRole::King as usize;
+        if counts[0][king_idx] != 1 || counts[1][king_idx] != 1 {
+            return None;
+        }
+
         let pawns = PawnStructure::new(pawn_bitboards[0], pawn_bitboards[1]);
 
         Some(Self::new(counts, pawns))
@@ -532,6 +537,16 @@ mod tests {
     #[test]
     fn rejects_missing_separator() {
         assert!(MaterialKey::from_string("KQK").is_none());
+    }
+
+    #[test]
+    fn rejects_missing_king() {
+        assert!(MaterialKey::from_string("QvK").is_none());
+    }
+
+    #[test]
+    fn rejects_empty_string() {
+        assert!(MaterialKey::from_string("").is_none());
     }
 
     #[test]
