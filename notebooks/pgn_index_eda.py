@@ -155,11 +155,5 @@ def _(alt, df, mo):
     return
 
 
-@app.cell
-def _(chart2):
-    chart2(1e9)
-    return
-
-
 if __name__ == "__main__":
     app.run()
