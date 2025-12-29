@@ -48,7 +48,7 @@ impl DtzScore {
         } else if self.0 < 0 {
             Self(self.0 + 1)
         } else {
-            self.clone()
+            *self
         }
     }
 }

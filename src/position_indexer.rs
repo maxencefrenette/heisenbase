@@ -7,7 +7,7 @@ fn nth_light_square(n: u32) -> Square {
     debug_assert!(n < 32);
     let rank = n / 4;
     let file_index = n % 4;
-    let file = if rank % 2 == 0 {
+    let file = if rank.is_multiple_of(2) {
         1 + 2 * file_index
     } else {
         2 * file_index
@@ -19,7 +19,7 @@ fn nth_dark_square(n: u32) -> Square {
     debug_assert!(n < 32);
     let rank = n / 4;
     let file_index = n % 4;
-    let file = if rank % 2 == 0 {
+    let file = if rank.is_multiple_of(2) {
         2 * file_index
     } else {
         1 + 2 * file_index

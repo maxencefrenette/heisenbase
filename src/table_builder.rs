@@ -109,7 +109,7 @@ impl TableBuilder {
                 let new_score = self.score_position(&self.positions, pos_index);
                 *new_score_cell = new_score;
 
-                return (new_score != old_score) as usize;
+                (new_score != old_score) as usize
             })
             .sum::<usize>();
 

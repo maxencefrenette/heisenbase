@@ -155,7 +155,7 @@ fn write_full_index(
 }
 
 fn polars_to_io_error(err: PolarsError) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, err.to_string())
+    io::Error::other(err.to_string())
 }
 
 struct IndexVisitor<'a> {

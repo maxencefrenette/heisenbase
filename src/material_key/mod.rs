@@ -473,7 +473,7 @@ impl fmt::Display for MaterialKey {
             }
 
             for square in self.pawns.0[color] {
-                write!(f, "{}", square.to_string())?;
+                write!(f, "{}", square)?;
             }
         }
 

@@ -122,7 +122,7 @@ impl PawnStructure {
                 }))
         }
 
-        one_sided(&self)
+        one_sided(self)
             .chain(one_sided(&self.flip_sides()).map(|ps| ps.flip_sides()))
             .collect()
     }

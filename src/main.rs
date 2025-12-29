@@ -191,11 +191,9 @@ fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), Box<dyn Erro
         }
         println!("Generating {}", material_str);
         if let Err(err) = run_generate(material_key) {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("failed to generate {}: {}", material_str, err),
-            )
-            .into());
+            return Err(
+                io::Error::other(format!("failed to generate {}: {}", material_str, err)).into(),
+            );
         }
     }
 
@@ -399,11 +397,7 @@ fn run_check_against_syzygy() -> Result<(), Box<dyn Error>> {
     }
 
     if total_mismatches > 0 || missing_tables > 0 || probe_errors > 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "syzygy comparison reported mismatches or errors",
-        )
-        .into());
+        return Err(io::Error::other("syzygy comparison reported mismatches or errors").into());
     }
 
     Ok(())
