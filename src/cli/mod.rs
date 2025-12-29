@@ -74,7 +74,7 @@ pub fn run() -> Result<(), String> {
                 .map_err(|err| format!("check-against-syzygy failed: {err}"))?;
         }
         Commands::IndexInit => {
-            index::run_index_init().map_err(|err| format!("ìndex-init failed: {err}"))?;
+            index::run_index_init().map_err(|err| format!("index-init failed: {err}"))?;
         }
     }
 
