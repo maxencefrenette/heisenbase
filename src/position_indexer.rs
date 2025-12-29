@@ -1,7 +1,6 @@
 use crate::material_key::{HbPieceRole, MaterialKey};
 use shakmaty::{
-    Bitboard, CastlingMode, Chess, Color, FromSetup, Piece, Position, PositionErrorKinds, Role,
-    Setup, Square,
+    Bitboard, CastlingMode, Chess, Color, FromSetup, Position, PositionErrorKinds, Setup, Square,
 };
 
 fn nth_light_square(n: u32) -> Square {
