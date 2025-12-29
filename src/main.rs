@@ -122,6 +122,7 @@ fn run_generate(material: MaterialKey) -> io::Result<()> {
     let filename = format!("./data/heisenbase/{}.hbt", wdl_table.material);
     write_wdl_file(&filename, &wdl_table)?;
     println!("Wrote table to {}", filename);
+    println!();
     Ok(())
 }
 
