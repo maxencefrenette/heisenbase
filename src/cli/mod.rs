@@ -1,4 +1,5 @@
 mod generate;
+mod index;
 mod index_pgn;
 
 use clap::{Parser, Subcommand};
@@ -41,6 +42,9 @@ enum Commands {
     PgnIndexStage2,
     /// Sample positions from heisenbase tables and compare against Syzygy WDL tables.
     CheckAgainstSyzygy,
+    /// Initialize the DuckDB material key index.
+    #[command(name = "ìndex-init")]
+    IndexInit,
 }
 
 /// Parse CLI arguments and execute the requested command.
@@ -68,6 +72,9 @@ pub fn run() -> Result<(), String> {
         Commands::CheckAgainstSyzygy => {
             run_check_against_syzygy()
                 .map_err(|err| format!("check-against-syzygy failed: {err}"))?;
+        }
+        Commands::IndexInit => {
+            index::run_index_init().map_err(|err| format!("ìndex-init failed: {err}"))?;
         }
     }
 

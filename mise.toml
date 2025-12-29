@@ -1,5 +1,6 @@
 [tools]
 cargo-insta = "latest"
+duckdb = "latest"
 prek = "latest"
 python = "latest"
 rust = "latest"
