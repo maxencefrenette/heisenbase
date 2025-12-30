@@ -48,94 +48,71 @@ impl MaterialKey {
     /// tokens, has a missing or extra separator, or is otherwise ambiguous.
     pub fn from_string(s: &str) -> Option<Self> {
         let (white, black) = s.split_once('v')?;
-        if black.contains('v') {
-            return None;
-        }
-
         let mut counts = ByColor::new_with(|_| [0u8; HbPieceRole::ALL.len()]);
-        let mut pawn_bitboards = ByColor::new_with(|_| Bitboard::EMPTY);
+        let mut pawns = ByColor::new_with(|_| Bitboard::EMPTY);
         let mut occupied = Bitboard::EMPTY;
 
-        fn push_pieces(
-            out: &mut ByColor<[u8; HbPieceRole::ALL.len()]>,
+        fn parse_side(
+            side: &str,
+            color: Color,
+            counts: &mut ByColor<[u8; HbPieceRole::ALL.len()]>,
             pawns: &mut ByColor<Bitboard>,
             occupied: &mut Bitboard,
-            s: &str,
-            color: Color,
         ) -> Option<()> {
-            let counts = &mut out[color];
-            let bytes = s.as_bytes();
-            let mut i = 0;
-            while i < bytes.len() {
-                match bytes[i] {
+            let mut bytes = side.as_bytes().iter().copied();
+            while let Some(byte) = bytes.next() {
+                match byte {
                     b'K' => {
-                        counts[HbPieceRole::King as usize] += 1;
-                        i += 1;
+                        counts[color][HbPieceRole::King as usize] += 1;
                     }
                     b'Q' => {
-                        counts[HbPieceRole::Queen as usize] += 1;
-                        i += 1;
+                        counts[color][HbPieceRole::Queen as usize] += 1;
                     }
                     b'R' => {
-                        counts[HbPieceRole::Rook as usize] += 1;
-                        i += 1;
+                        counts[color][HbPieceRole::Rook as usize] += 1;
                     }
                     b'N' => {
-                        counts[HbPieceRole::Knight as usize] += 1;
-                        i += 1;
+                        counts[color][HbPieceRole::Knight as usize] += 1;
                     }
                     b'B' => {
-                        let next = *bytes.get(i + 1)?;
+                        let next = bytes.next()?;
                         let role = match next {
                             b'l' => HbPieceRole::LightBishop,
                             b'd' => HbPieceRole::DarkBishop,
                             _ => return None,
                         };
-                        counts[role as usize] += 1;
-                        i += 2;
+                        counts[color][role as usize] += 1;
                     }
                     b'a'..=b'h' => {
-                        if i + 1 >= bytes.len() {
+                        let rank = bytes.next()?;
+                        if !(b'1'..=b'8').contains(&rank) {
                             return None;
                         }
-                        let square = Square::from_ascii(&bytes[i..i + 2]).ok()?;
+                        let square = Square::from_ascii(&[byte, rank]).ok()?;
                         if occupied.contains(square) {
                             return None;
                         }
                         pawns[color].add(square);
                         occupied.add(square);
-                        i += 2;
                     }
                     _ => return None,
                 }
             }
-
             Some(())
         }
 
-        push_pieces(
-            &mut counts,
-            &mut pawn_bitboards,
-            &mut occupied,
-            white,
-            Color::White,
-        )?;
-        push_pieces(
-            &mut counts,
-            &mut pawn_bitboards,
-            &mut occupied,
-            black,
-            Color::Black,
-        )?;
+        parse_side(white, Color::White, &mut counts, &mut pawns, &mut occupied)?;
+        parse_side(black, Color::Black, &mut counts, &mut pawns, &mut occupied)?;
 
         let king_idx = HbPieceRole::King as usize;
         if counts.white[king_idx] != 1 || counts.black[king_idx] != 1 {
             return None;
         }
 
-        let pawns = PawnStructure::new(pawn_bitboards.white, pawn_bitboards.black);
-
-        Some(Self::new(counts, pawns))
+        Some(Self::new(
+            counts,
+            PawnStructure::new(pawns.white, pawns.black),
+        ))
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
