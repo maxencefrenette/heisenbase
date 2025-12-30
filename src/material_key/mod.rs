@@ -384,8 +384,13 @@ impl PartialOrd for MaterialKey {
 
 impl Ord for MaterialKey {
     fn cmp(&self, other: &Self) -> Ordering {
+        // This is used to normalize the material key, so we compare with a specific ordering to
+        // ensure that normalized material keys visually look nice.
         self.pawns
-            .cmp(&other.pawns)
+            .0
+            .black
+            .cmp(&other.pawns.0.black)
+            .then_with(|| self.pawns.0.white.cmp(&other.pawns.0.white))
             .then_with(|| self.counts.cmp(&other.counts).reverse())
     }
 }
@@ -478,10 +483,10 @@ mod tests {
         assert_debug_snapshot!(children, @r#"
         [
             "KNvK",
-            "KvKc4",
-            "KNvKd4",
-            "KvKd4",
-            "KvKd5",
+            "Kd4vK",
+            "Kc5vK",
+            "Kd5vKN",
+            "Kd5vK",
         ]
         "#);
     }
@@ -514,8 +519,8 @@ mod tests {
         assert_debug_snapshot!(children, @r#"
         [
             "KBlvK",
-            "KvKBdd5",
-            "KvKd6",
+            "Kd3vK",
+            "KBld4vK",
         ]
         "#);
     }

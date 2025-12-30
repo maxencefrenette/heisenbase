@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-
 use shakmaty::{Bitboard, Board, ByColor, Color, File, Rank};
 
 /// Represents the pawn structure of a position, i.e. the pawns on the board.
@@ -197,21 +195,6 @@ impl PawnStructure {
                 child
             })
             .collect()
-    }
-}
-
-impl PartialOrd for PawnStructure {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for PawnStructure {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .white
-            .cmp(&other.0.white)
-            .then_with(|| self.0.black.cmp(&other.0.black))
     }
 }
 
