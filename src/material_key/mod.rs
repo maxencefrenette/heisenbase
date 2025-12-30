@@ -4,7 +4,7 @@ mod pawn_structure;
 use crate::material_key::pawn_structure::PawnStructure;
 use itertools::iproduct;
 use shakmaty::{Bitboard, Chess, Color, Position, Role, Square};
-use std::{cmp::Ordering, fmt, iter::once};
+use std::{cmp::Ordering, collections::BTreeSet, fmt, iter::once};
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -283,8 +283,8 @@ impl MaterialKey {
         Color::White
     }
 
-    pub fn child_material_keys(&self) -> Vec<MaterialKey> {
-        let mut children = Vec::new();
+    pub fn child_material_keys(&self) -> BTreeSet<MaterialKey> {
+        let mut children = BTreeSet::new();
 
         // Simple pawn moves
         children.extend(
@@ -365,8 +365,6 @@ impl MaterialKey {
             );
         }
 
-        children.sort_unstable();
-        children.dedup();
         children
     }
 
