@@ -1,5 +1,6 @@
 mod hb_piece;
 mod pawn_structure;
+mod piece_counts;
 
 use crate::material_key::pawn_structure::PawnStructure;
 use itertools::iproduct;
@@ -11,20 +12,17 @@ use winnow::prelude::*;
 use winnow::token::{literal, take};
 
 pub use hb_piece::{HbPiece, HbPieceRole};
+pub use piece_counts::PieceCounts;
 
 /// Represents a material configuration, e.g. `KQvK`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MaterialKey {
     pub pawns: PawnStructure,
-    /// Piece counts indexed by color then piece descriptor.
-    /// By convention the strong side is encoded as white when pawn structures
-    /// are symmetric under a vertical flip; otherwise pawn-structure ordering
-    /// takes precedence and the stronger side may appear second.
-    pub counts: ByColor<[u8; HbPieceRole::ALL.len()]>,
+    pub counts: ByColor<PieceCounts>,
 }
 
 impl MaterialKey {
-    pub fn new(counts: ByColor<[u8; HbPieceRole::ALL.len()]>, pawns: PawnStructure) -> Self {
+    pub fn new(counts: ByColor<PieceCounts>, pawns: PawnStructure) -> Self {
         let key = Self { counts, pawns };
         key.into_normalized()
     }
@@ -67,13 +65,13 @@ impl MaterialKey {
             .parse_next(input)
         }
 
-        fn side(input: &mut &[u8]) -> ModalResult<([u8; HbPieceRole::ALL.len()], Bitboard)> {
+        fn side(input: &mut &[u8]) -> ModalResult<(PieceCounts, Bitboard)> {
             literal("K").parse_next(input)?;
 
             let tokens: Vec<HbPieceRole> = repeat(0.., token).parse_next(input)?;
-            let mut piece_counts = [0u8; HbPieceRole::ALL.len()];
+            let mut piece_counts = PieceCounts::empty();
             for role in tokens {
-                piece_counts[role as usize] += 1;
+                piece_counts[role] += 1;
             }
             let squares: Vec<Square> = repeat(0.., pawn_square).parse_next(input)?;
             let bitboard = squares.into_iter().collect::<Bitboard>();
@@ -94,34 +92,23 @@ impl MaterialKey {
         let pawns = PawnStructure::new(white_pawns, black_pawns).ok()?;
 
         // Add kings
-        counts.white[HbPieceRole::King as usize] += 1;
-        counts.black[HbPieceRole::King as usize] += 1;
+        counts.white[HbPieceRole::King] += 1;
+        counts.black[HbPieceRole::King] += 1;
 
         Some(Self::new(counts, pawns))
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
-        self.counts
-            .iter()
-            .map(|side| side.iter().sum::<u8>())
-            .sum::<u8>() as u32
+        self.counts.iter().map(|side| side.total()).sum::<u8>() as u32
     }
 
     pub fn total_piece_count(&self) -> u32 {
-        self.counts
-            .iter()
-            .map(|side| side.iter().sum::<u8>())
-            .sum::<u8>() as u32
+        self.counts.iter().map(|side| side.total()).sum::<u8>() as u32
             + self.pawns.occupied().count() as u32
     }
 
     fn swap_bishop_counts(&mut self) {
-        self.counts.for_each(|mut side| {
-            side.swap(
-                HbPieceRole::LightBishop as usize,
-                HbPieceRole::DarkBishop as usize,
-            )
-        });
+        self.counts.for_each(|mut side| side.swap_bishops());
     }
 
     /// Mirror the sides of the board (white-to-black and black-to-white)
@@ -175,12 +162,12 @@ impl MaterialKey {
                     HbPieceRole::CAPTURABLE,
                 )
                 .filter_map(|(ps, role)| {
-                    if self.counts[opponent][role as usize] == 0 {
+                    if self.counts[opponent][role] == 0 {
                         return None;
                     }
 
                     let mut counts = self.counts.clone();
-                    counts[opponent][role as usize] -= 1;
+                    counts[opponent][role] -= 1;
                     Some(MaterialKey::new(counts, ps))
                 }),
             );
@@ -192,12 +179,12 @@ impl MaterialKey {
                     HbPieceRole::CAPTURABLE,
                 )
                 .filter_map(|(ps, role)| {
-                    if self.counts[color][role as usize] == 0 {
+                    if self.counts[color][role] == 0 {
                         return None;
                     }
 
                     let mut counts = self.counts.clone();
-                    counts[color][role as usize] += 1;
+                    counts[color][role] += 1;
                     Some(MaterialKey::new(counts, ps))
                 }),
             );
@@ -210,17 +197,17 @@ impl MaterialKey {
                     HbPieceRole::CAPTURABLE,
                 )
                 .filter_map(|(ps, role1, role2)| {
-                    if self.counts[color][role1 as usize] == 0 {
+                    if self.counts[color][role1] == 0 {
                         return None;
                     }
 
-                    if self.counts[opponent][role2 as usize] == 0 {
+                    if self.counts[opponent][role2] == 0 {
                         return None;
                     }
 
                     let mut counts = self.counts.clone();
-                    counts[color][role1 as usize] += 1;
-                    counts[opponent][role2 as usize] -= 1;
+                    counts[color][role1] += 1;
+                    counts[opponent][role2] -= 1;
                     Some(MaterialKey::new(counts, ps))
                 }),
             );
@@ -230,26 +217,24 @@ impl MaterialKey {
     }
 
     pub fn from_position(position: &Chess) -> Option<Self> {
-        let mut counts = ByColor::new_with(|_| [0u8; HbPieceRole::ALL.len()]);
+        let mut counts = ByColor::new_with(|_| PieceCounts::empty());
         for square in Square::ALL {
             if let Some(piece) = position.board().piece_at(square) {
-                if piece.role == Role::Pawn {
-                    continue;
-                }
-
                 let piece_idx = match piece.role {
-                    Role::King => HbPieceRole::King as usize,
-                    Role::Queen => HbPieceRole::Queen as usize,
-                    Role::Rook => HbPieceRole::Rook as usize,
+                    Role::King => HbPieceRole::King,
+                    Role::Queen => HbPieceRole::Queen,
+                    Role::Rook => HbPieceRole::Rook,
                     Role::Bishop => {
                         if square.is_light() {
-                            HbPieceRole::LightBishop as usize
+                            HbPieceRole::LightBishop
                         } else {
-                            HbPieceRole::DarkBishop as usize
+                            HbPieceRole::DarkBishop
                         }
                     }
-                    Role::Knight => HbPieceRole::Knight as usize,
-                    Role::Pawn => unreachable!(),
+                    Role::Knight => HbPieceRole::Knight,
+                    Role::Pawn => {
+                        continue;
+                    }
                 };
                 counts[piece.color][piece_idx] += 1;
             }
@@ -264,7 +249,7 @@ impl MaterialKey {
     pub fn pieces(&self) -> impl Iterator<Item = HbPiece> {
         Color::ALL.into_iter().flat_map(move |color| {
             HbPieceRole::ALL.iter().copied().flat_map(move |piece| {
-                (0..self.counts[color][piece as usize]).map(move |_| HbPiece { role: piece, color })
+                (0..self.counts[color][piece]).map(move |_| HbPiece { role: piece, color })
             })
         })
     }
@@ -281,7 +266,7 @@ impl fmt::Display for MaterialKey {
             let counts = self.counts[color];
 
             for role in HbPieceRole::ALL {
-                for _ in 0..counts[role as usize] {
+                for _ in 0..counts[role] {
                     write!(f, "{}", role.token())?;
                 }
             }
