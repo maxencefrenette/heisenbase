@@ -191,7 +191,7 @@ mod tests {
         string_regex("K(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}vK(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}")
             .unwrap()
             .prop_filter_map("valid material key", |value| {
-                MaterialKey::from_string(&value)
+                MaterialKey::from_string(&value).ok()
             })
     }
 

@@ -122,7 +122,7 @@ fn material_keys_from_dir(dir: &Path) -> Result<Vec<MaterialKey>, Box<dyn Error>
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let Some(key) = MaterialKey::from_string(stem) else {
+        let Ok(key) = MaterialKey::from_string(stem) else {
             eprintln!(
                 "Skipping unrecognized material key file: {}",
                 path.display()

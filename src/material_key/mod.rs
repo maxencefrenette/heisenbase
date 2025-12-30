@@ -5,6 +5,7 @@ mod piece_counts;
 use crate::material_key::pawn_structure::PawnStructure;
 use itertools::iproduct;
 use shakmaty::{Bitboard, ByColor, Chess, Color, Position, Role, Square};
+use std::fmt::Debug;
 use std::{cmp::Ordering, collections::BTreeSet, fmt, iter::once};
 use winnow::ModalResult;
 use winnow::combinator::{alt, eof, fail, repeat, separated_pair, terminated};
@@ -44,11 +45,7 @@ impl MaterialKey {
     /// Pawn squares are a sequence of lowercase file/rank pairs (`a1`..`h8`).
     /// Pieces appearing before the separator are interpreted as white, while those after
     /// it are treated as black.
-    ///
-    /// # Errors
-    /// Returns `None` if the string is malformed, contains unsupported
-    /// tokens, has a missing or extra separator, or is otherwise ambiguous.
-    pub fn from_string(s: &str) -> Option<Self> {
+    pub fn from_string(s: &str) -> Result<Self, String> {
         fn pawn_square(input: &mut &[u8]) -> ModalResult<Square> {
             Square::from_ascii(take(2usize).parse_next(input)?)
                 .or_else(|_| fail.parse_next(input)?)
@@ -83,19 +80,19 @@ impl MaterialKey {
         let ((white_piece_counts, white_pawns), (black_piece_counts, black_pawns)) =
             terminated(separated_pair(side, 'v', side), eof)
                 .parse_next(&mut input)
-                .ok()?;
+                .map_err(|e| e.to_string())?;
 
         let mut counts = ByColor {
             white: white_piece_counts,
             black: black_piece_counts,
         };
-        let pawns = PawnStructure::new(white_pawns, black_pawns).ok()?;
+        let pawns = PawnStructure::new(white_pawns, black_pawns).map_err(|e| format!("{:?}", e))?;
 
         // Add kings
         counts.white[HbPieceRole::King] += 1;
         counts.black[HbPieceRole::King] += 1;
 
-        Some(Self::new(counts, pawns))
+        Ok(Self::new(counts, pawns))
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
@@ -315,7 +312,7 @@ mod tests {
         string_regex("K(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}vK(Q|R|Bl|Bd|N){0,2}([a-h][2-7]){0,3}")
             .unwrap()
             .prop_filter("valid material key", |value| {
-                MaterialKey::from_string(value).is_some()
+                MaterialKey::from_string(value).is_ok()
             })
     }
 
@@ -353,32 +350,32 @@ mod tests {
 
     #[test]
     fn rejects_invalid_char() {
-        assert!(MaterialKey::from_string("KXvK").is_none());
+        assert!(MaterialKey::from_string("KXvK").is_err());
     }
 
     #[test]
     fn rejects_missing_separator() {
-        assert!(MaterialKey::from_string("KQK").is_none());
+        assert!(MaterialKey::from_string("KQK").is_err());
     }
 
     #[test]
     fn rejects_missing_king() {
-        assert!(MaterialKey::from_string("QvK").is_none());
+        assert!(MaterialKey::from_string("QvK").is_err());
     }
 
     #[test]
     fn rejects_empty_string() {
-        assert!(MaterialKey::from_string("").is_none());
+        assert!(MaterialKey::from_string("").is_err());
     }
 
     #[test]
     fn rejects_incomplete_pawn_square() {
-        assert!(MaterialKey::from_string("KavK").is_none());
+        assert!(MaterialKey::from_string("KavK").is_err());
     }
 
     #[test]
     fn rejects_overlapping_pawns() {
-        assert!(MaterialKey::from_string("Ke4vKe4").is_none());
+        assert!(MaterialKey::from_string("Ke4vKe4").is_err());
     }
 
     #[test]

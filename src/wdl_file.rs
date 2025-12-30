@@ -64,7 +64,7 @@ pub fn read_wdl_file<P: AsRef<Path>>(path: P) -> io::Result<WdlTable> {
     let mk_string = String::from_utf8(mk_bytes)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid material key"))?;
     let material = MaterialKey::from_string(&mk_string)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid material key"))?;
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid material key"))?;
 
     // WDL Table
     let mut buf = [0u8; 8];

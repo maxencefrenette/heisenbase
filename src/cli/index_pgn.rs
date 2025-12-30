@@ -300,7 +300,7 @@ fn material_key_num_non_pawns(key: &str) -> io::Result<u32> {
 }
 
 fn parse_material_key(key: &str) -> io::Result<MaterialKey> {
-    MaterialKey::from_string(key).ok_or_else(|| {
+    MaterialKey::from_string(key).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("invalid material_key: {key}"),
