@@ -6,9 +6,9 @@ use itertools::iproduct;
 use shakmaty::{Bitboard, ByColor, Chess, Color, Position, Role, Square};
 use std::{cmp::Ordering, collections::BTreeSet, fmt, iter::once};
 use winnow::ModalResult;
-use winnow::combinator::{alt, eof, repeat, separated_pair, terminated};
+use winnow::combinator::{alt, eof, fail, repeat, separated_pair, terminated};
 use winnow::prelude::*;
-use winnow::token::one_of;
+use winnow::token::take;
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -50,16 +50,13 @@ impl MaterialKey {
     /// # Errors
     /// Returns `None` if the string is malformed, contains unsupported
     /// tokens, has a missing or extra separator, or is otherwise ambiguous.
-    pub fn from_string(mut s: &str) -> Option<Self> {
-        fn pawn_square(input: &mut &str) -> ModalResult<Square> {
-            let file = one_of('a'..='h').parse_next(input)?;
-            let rank = one_of('1'..='8').parse_next(input)?;
-            let square =
-                Square::from_ascii(&[file as u8, rank as u8]).expect("file/rank already validated");
-            Ok(square)
+    pub fn from_string(s: &str) -> Option<Self> {
+        fn pawn_square(input: &mut &[u8]) -> ModalResult<Square> {
+            Square::from_ascii(take(2usize).parse_next(input)?)
+                .or_else(|_| fail.parse_next(input)?)
         }
 
-        fn token(input: &mut &str) -> ModalResult<HbPieceRole> {
+        fn token(input: &mut &[u8]) -> ModalResult<HbPieceRole> {
             alt((
                 'K'.value(HbPieceRole::King),
                 'Q'.value(HbPieceRole::Queen),
@@ -71,7 +68,7 @@ impl MaterialKey {
             .parse_next(input)
         }
 
-        fn side(input: &mut &str) -> ModalResult<([u8; HbPieceRole::ALL.len()], Bitboard)> {
+        fn side(input: &mut &[u8]) -> ModalResult<([u8; HbPieceRole::ALL.len()], Bitboard)> {
             let tokens: Vec<HbPieceRole> = repeat(0.., token).parse_next(input)?;
             let mut piece_counts = [0u8; HbPieceRole::ALL.len()];
             for role in tokens {
@@ -83,9 +80,10 @@ impl MaterialKey {
             Ok((piece_counts, bitboard))
         }
 
+        let mut input = s.as_bytes();
         let ((white_piece_counts, white_pawns), (black_piece_counts, black_pawns)) =
             terminated(separated_pair(side, 'v', side), eof)
-                .parse_next(&mut s)
+                .parse_next(&mut input)
                 .ok()?;
 
         let counts = ByColor {
