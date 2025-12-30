@@ -4,18 +4,34 @@ use shakmaty::{Bitboard, Board, ByColor, Color, File, Rank};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PawnStructure(pub ByColor<Bitboard>);
 
+#[derive(Debug)]
+pub enum PawnStructureError {
+    OverlappingPawns,
+}
+
 impl PawnStructure {
-    pub fn new(white_pawns: Bitboard, black_pawns: Bitboard) -> Self {
-        Self(ByColor {
+    pub fn new(white_pawns: Bitboard, black_pawns: Bitboard) -> Result<Self, PawnStructureError> {
+        if white_pawns & black_pawns != Bitboard::EMPTY {
+            return Err(PawnStructureError::OverlappingPawns);
+        }
+
+        Ok(Self(ByColor {
             white: white_pawns,
             black: black_pawns,
-        })
+        }))
     }
 
     pub fn from_board(board: &Board) -> Self {
         Self(ByColor {
             white: board.pawns() & board.white(),
             black: board.pawns() & board.black(),
+        })
+    }
+
+    pub fn empty() -> Self {
+        Self(ByColor {
+            white: Bitboard::EMPTY,
+            black: Bitboard::EMPTY,
         })
     }
 
@@ -206,7 +222,7 @@ mod tests {
 
     #[test]
     fn empty_pawn_structure_generates_no_moves() {
-        let parent = PawnStructure::new(Bitboard::EMPTY, Bitboard::EMPTY);
+        let parent = PawnStructure::empty();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .
@@ -231,7 +247,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E2),
             Bitboard::from_square(Square::E7),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . p . . .
@@ -307,7 +324,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E2),
             Bitboard::from_square(Square::E3),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .
@@ -353,7 +371,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E2),
             Bitboard::from_square(Square::E4),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .
@@ -417,7 +436,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E4),
             Bitboard::from_square(Square::D5),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .
@@ -499,7 +519,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::A7),
             Bitboard::from_square(Square::H2),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         P . . . . . . .
@@ -545,7 +566,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E4),
             Bitboard::from_square(Square::E5),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .
@@ -591,7 +613,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::E4),
             Bitboard::from_square(Square::D5) | Bitboard::from_square(Square::F5),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .
@@ -616,7 +639,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::B2),
             Bitboard::from_square(Square::G7),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . p .
@@ -662,7 +686,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::A7),
             Bitboard::from_square(Square::H2),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         P . . . . . . .
@@ -699,7 +724,8 @@ mod tests {
         let parent = PawnStructure::new(
             Bitboard::from_square(Square::H7),
             Bitboard::from_square(Square::A2),
-        );
+        )
+        .unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . P
@@ -733,7 +759,8 @@ mod tests {
 
     #[test]
     fn child_pawn_structures_no_promotion_possible() {
-        let parent = PawnStructure::new(Bitboard::from_square(Square::D3), Bitboard::EMPTY);
+        let parent =
+            PawnStructure::new(Bitboard::from_square(Square::D3), Bitboard::EMPTY).unwrap();
         assert_debug_snapshot!(parent.to_board(), @"
         . . . . . . . .
         . . . . . . . .

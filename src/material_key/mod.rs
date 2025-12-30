@@ -5,6 +5,10 @@ use crate::material_key::pawn_structure::PawnStructure;
 use itertools::iproduct;
 use shakmaty::{Bitboard, ByColor, Chess, Color, Position, Role, Square};
 use std::{cmp::Ordering, collections::BTreeSet, fmt, iter::once};
+use winnow::ModalResult;
+use winnow::combinator::{alt, eof, repeat, separated_pair, terminated};
+use winnow::prelude::*;
+use winnow::token::one_of;
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -46,73 +50,59 @@ impl MaterialKey {
     /// # Errors
     /// Returns `None` if the string is malformed, contains unsupported
     /// tokens, has a missing or extra separator, or is otherwise ambiguous.
-    pub fn from_string(s: &str) -> Option<Self> {
-        let (white, black) = s.split_once('v')?;
-        let mut counts = ByColor::new_with(|_| [0u8; HbPieceRole::ALL.len()]);
-        let mut pawns = ByColor::new_with(|_| Bitboard::EMPTY);
-        let mut occupied = Bitboard::EMPTY;
-
-        fn parse_side(
-            side: &str,
-            color: Color,
-            counts: &mut ByColor<[u8; HbPieceRole::ALL.len()]>,
-            pawns: &mut ByColor<Bitboard>,
-            occupied: &mut Bitboard,
-        ) -> Option<()> {
-            let mut bytes = side.as_bytes().iter().copied();
-            while let Some(byte) = bytes.next() {
-                match byte {
-                    b'K' => {
-                        counts[color][HbPieceRole::King as usize] += 1;
-                    }
-                    b'Q' => {
-                        counts[color][HbPieceRole::Queen as usize] += 1;
-                    }
-                    b'R' => {
-                        counts[color][HbPieceRole::Rook as usize] += 1;
-                    }
-                    b'N' => {
-                        counts[color][HbPieceRole::Knight as usize] += 1;
-                    }
-                    b'B' => {
-                        let next = bytes.next()?;
-                        let role = match next {
-                            b'l' => HbPieceRole::LightBishop,
-                            b'd' => HbPieceRole::DarkBishop,
-                            _ => return None,
-                        };
-                        counts[color][role as usize] += 1;
-                    }
-                    b'a'..=b'h' => {
-                        let rank = bytes.next()?;
-                        if !(b'1'..=b'8').contains(&rank) {
-                            return None;
-                        }
-                        let square = Square::from_ascii(&[byte, rank]).ok()?;
-                        if occupied.contains(square) {
-                            return None;
-                        }
-                        pawns[color].add(square);
-                        occupied.add(square);
-                    }
-                    _ => return None,
-                }
-            }
-            Some(())
+    pub fn from_string(mut s: &str) -> Option<Self> {
+        fn pawn_square(input: &mut &str) -> ModalResult<Square> {
+            let file = one_of('a'..='h').parse_next(input)?;
+            let rank = one_of('1'..='8').parse_next(input)?;
+            let square =
+                Square::from_ascii(&[file as u8, rank as u8]).expect("file/rank already validated");
+            Ok(square)
         }
 
-        parse_side(white, Color::White, &mut counts, &mut pawns, &mut occupied)?;
-        parse_side(black, Color::Black, &mut counts, &mut pawns, &mut occupied)?;
+        fn token(input: &mut &str) -> ModalResult<HbPieceRole> {
+            alt((
+                'K'.value(HbPieceRole::King),
+                'Q'.value(HbPieceRole::Queen),
+                'R'.value(HbPieceRole::Rook),
+                'N'.value(HbPieceRole::Knight),
+                "Bl".value(HbPieceRole::LightBishop),
+                "Bd".value(HbPieceRole::DarkBishop),
+            ))
+            .parse_next(input)
+        }
 
-        let king_idx = HbPieceRole::King as usize;
-        if counts.white[king_idx] != 1 || counts.black[king_idx] != 1 {
+        fn side(input: &mut &str) -> ModalResult<([u8; HbPieceRole::ALL.len()], Bitboard)> {
+            let tokens: Vec<HbPieceRole> = repeat(0.., token).parse_next(input)?;
+            let mut piece_counts = [0u8; HbPieceRole::ALL.len()];
+            for role in tokens {
+                piece_counts[role as usize] += 1;
+            }
+            let squares: Vec<Square> = repeat(0.., pawn_square).parse_next(input)?;
+            let bitboard = squares.into_iter().collect::<Bitboard>();
+
+            Ok((piece_counts, bitboard))
+        }
+
+        let ((white_piece_counts, white_pawns), (black_piece_counts, black_pawns)) =
+            terminated(separated_pair(side, 'v', side), eof)
+                .parse_next(&mut s)
+                .ok()?;
+
+        let counts = ByColor {
+            white: white_piece_counts,
+            black: black_piece_counts,
+        };
+        let pawns = PawnStructure::new(white_pawns, black_pawns).ok()?;
+
+        // Check that both sides have a king
+        if Color::ALL
+            .into_iter()
+            .any(|color| counts[color][HbPieceRole::King as usize] == 0)
+        {
             return None;
         }
 
-        Some(Self::new(
-            counts,
-            PawnStructure::new(pawns.white, pawns.black),
-        ))
+        Some(Self::new(counts, pawns))
     }
 
     pub fn non_pawn_piece_count(&self) -> u32 {
@@ -440,6 +430,11 @@ mod tests {
     #[test]
     fn rejects_incomplete_pawn_square() {
         assert!(MaterialKey::from_string("KavK").is_none());
+    }
+
+    #[test]
+    fn rejects_overlapping_pawns() {
+        assert!(MaterialKey::from_string("Ke4vKe4").is_none());
     }
 
     #[test]
