@@ -208,11 +208,10 @@ impl PartialOrd for PawnStructure {
 
 impl Ord for PawnStructure {
     fn cmp(&self, other: &Self) -> Ordering {
-        let white_cmp = self.0.white.cmp(&other.0.white);
-        if white_cmp != Ordering::Equal {
-            return white_cmp;
-        }
-        self.0.black.cmp(&other.0.black)
+        self.0
+            .white
+            .cmp(&other.0.white)
+            .then_with(|| self.0.black.cmp(&other.0.black))
     }
 }
 
