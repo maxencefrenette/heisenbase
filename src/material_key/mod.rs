@@ -272,54 +272,18 @@ impl MaterialKey {
 
 impl fmt::Display for MaterialKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn write_bishops(f: &mut fmt::Formatter<'_>, light: u8, dark: u8) -> fmt::Result {
-            for _ in 0..dark {
-                write!(f, "{}", HbPieceRole::DarkBishop.token())?;
-            }
-            for _ in 0..light {
-                write!(f, "{}", HbPieceRole::LightBishop.token())?;
-            }
-            Ok(())
-        }
-
-        let light_idx = HbPieceRole::LightBishop as usize;
-        let dark_idx = HbPieceRole::DarkBishop as usize;
-
-        for color_idx in 0..2 {
-            let color = match color_idx {
-                0 => Color::White,
-                1 => Color::Black,
-                _ => unreachable!(),
-            };
-
-            if color_idx == 1 {
+        for color in Color::ALL {
+            if color == Color::Black {
                 write!(f, "v")?;
             }
 
             // Manually emit pieces in canonical order to keep output stable.
             let counts = self.counts[color];
 
-            // Always write the king first.
-            for _ in 0..counts[HbPieceRole::King as usize] {
-                write!(f, "{}", HbPieceRole::King.token())?;
-            }
-
-            for _ in 0..counts[HbPieceRole::Queen as usize] {
-                write!(f, "{}", HbPieceRole::Queen.token())?;
-            }
-
-            for _ in 0..counts[HbPieceRole::Rook as usize] {
-                write!(f, "{}", HbPieceRole::Rook.token())?;
-            }
-
-            let light = counts[light_idx];
-            let dark = counts[dark_idx];
-            if light > 0 || dark > 0 {
-                write_bishops(f, light, dark)?;
-            }
-
-            for _ in 0..counts[HbPieceRole::Knight as usize] {
-                write!(f, "{}", HbPieceRole::Knight.token())?;
+            for role in HbPieceRole::ALL {
+                for _ in 0..counts[role as usize] {
+                    write!(f, "{}", role.token())?;
+                }
             }
 
             for square in self.pawns.0[color] {
