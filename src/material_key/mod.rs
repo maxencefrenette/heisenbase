@@ -9,7 +9,7 @@ use std::{cmp::Ordering, collections::BTreeSet, fmt, iter::once};
 pub use hb_piece::{HbPiece, HbPieceRole};
 
 /// Represents a material configuration, e.g. `KQvK`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MaterialKey {
     pub pawns: PawnStructure,
     /// Piece counts indexed by color then piece descriptor.
@@ -21,9 +21,8 @@ pub struct MaterialKey {
 
 impl MaterialKey {
     pub fn new(counts: [[u8; HbPieceRole::ALL.len()]; 2], pawns: PawnStructure) -> Self {
-        let mut key = Self { counts, pawns };
-        key.canonicalize();
-        key
+        let key = Self { counts, pawns };
+        key.into_normalized()
     }
 
     /// Parse a [`MaterialKey`] from its textual representation.
@@ -141,146 +140,42 @@ impl MaterialKey {
             + self.pawns.occupied().count() as u32
     }
 
-    fn canonicalize(&mut self) {
-        let order = self.pawns.0.white.cmp(&self.pawns.0.black.flip_vertical());
-        match order {
-            Ordering::Less => {
-                self.mirror_sides();
-                return;
-            }
-            Ordering::Equal => (),
-            Ordering::Greater => {
-                return;
-            }
-        }
-
-        // Ensure that the stronger side is white.
-        if Self::strong_color_from_counts(&self.counts) == Color::Black {
-            self.mirror_sides();
-        }
-
-        // Canonicalize bishop colors if needed.
-        if self.should_swap_bishops() {
-            self.mirror_left_to_right();
-        }
-    }
-
-    fn should_swap_bishops(&self) -> bool {
-        if !self.has_bishops() {
-            return false;
-        }
-
-        if !self.pawns.is_symmetric_horizontal() {
-            return false;
-        }
-
-        let current = Self::flatten_counts(&self.counts);
-        let swapped_counts = Self::swapped_bishop_counts(&self.counts);
-        let swapped = Self::flatten_counts(&swapped_counts);
-        swapped < current
-    }
-
-    /// Mirror the board left-to-right (kingside-to-queenside)
-    fn mirror_left_to_right(&mut self) {
-        // Flip the color of the bishops on the board.
-        let light_idx = HbPieceRole::LightBishop as usize;
-        let dark_idx = HbPieceRole::DarkBishop as usize;
+    fn swap_bishop_counts(&mut self) {
         for color_idx in 0..2 {
-            let light = self.counts[color_idx][light_idx];
-            let dark = self.counts[color_idx][dark_idx];
-            self.counts[color_idx][light_idx] = dark;
-            self.counts[color_idx][dark_idx] = light;
+            self.counts[color_idx].swap(
+                HbPieceRole::LightBishop as usize,
+                HbPieceRole::DarkBishop as usize,
+            );
         }
-
-        self.pawns = self.pawns.flip_horizontal();
-    }
-
-    fn swapped_bishop_counts(
-        counts: &[[u8; HbPieceRole::ALL.len()]; 2],
-    ) -> [[u8; HbPieceRole::ALL.len()]; 2] {
-        let mut swapped = *counts;
-        let light_idx = HbPieceRole::LightBishop as usize;
-        let dark_idx = HbPieceRole::DarkBishop as usize;
-        for color_idx in 0..2 {
-            swapped[color_idx][light_idx] = counts[color_idx][dark_idx];
-            swapped[color_idx][dark_idx] = counts[color_idx][light_idx];
-        }
-        swapped
-    }
-
-    fn flatten_counts(
-        counts: &[[u8; HbPieceRole::ALL.len()]; 2],
-    ) -> [u8; HbPieceRole::ALL.len() * 2] {
-        let mut flat = [0u8; HbPieceRole::ALL.len() * 2];
-        for color_idx in 0..2 {
-            for piece_idx in 0..HbPieceRole::ALL.len() {
-                flat[color_idx * HbPieceRole::ALL.len() + piece_idx] = counts[color_idx][piece_idx];
-            }
-        }
-        flat
-    }
-
-    pub fn has_pawns(&self) -> bool {
-        self.pawns.occupied().any()
-    }
-
-    pub fn has_bishops(&self) -> bool {
-        let light_idx = HbPieceRole::LightBishop as usize;
-        let dark_idx = HbPieceRole::DarkBishop as usize;
-        self.counts[0][light_idx] > 0
-            || self.counts[1][light_idx] > 0
-            || self.counts[0][dark_idx] > 0
-            || self.counts[1][dark_idx] > 0
     }
 
     /// Mirror the sides of the board (white-to-black and black-to-white)
-    fn mirror_sides(&mut self) {
+    fn into_mirrored_sides(mut self) -> Self {
         self.counts.swap(0, 1);
+        self.swap_bishop_counts();
         self.pawns = self.pawns.flip_sides();
+        self
     }
 
-    /// Determines which color has the stronger material based on piece counts.
-    ///
-    /// By design, this matches the logic used by syzygy tablebases.
-    ///
-    /// The first factor is the total piece count.
-    /// Then, it's which side has the strongest piece.
-    /// Finally, In case of a tie, White is considered stronger.
-    fn strong_color_from_counts(counts: &[[u8; HbPieceRole::ALL.len()]; 2]) -> Color {
-        let compare = |white: u8, black: u8| -> Option<Color> {
-            if white > black {
-                Some(Color::White)
-            } else if black > white {
-                Some(Color::Black)
-            } else {
-                None
-            }
-        };
+    /// Mirror the board left-to-right (kingside-to-queenside)
+    fn into_mirrored_left_to_right(mut self) -> Self {
+        self.swap_bishop_counts();
+        self.pawns = self.pawns.flip_horizontal();
+        self
+    }
 
-        let queen_idx = HbPieceRole::Queen as usize;
-        if let Some(color) = compare(counts[0][queen_idx], counts[1][queen_idx]) {
-            return color;
-        }
-
-        let rook_idx = HbPieceRole::Rook as usize;
-        if let Some(color) = compare(counts[0][rook_idx], counts[1][rook_idx]) {
-            return color;
-        }
-
-        let light_idx = HbPieceRole::LightBishop as usize;
-        let dark_idx = HbPieceRole::DarkBishop as usize;
-        let white_bishops = counts[0][light_idx] + counts[0][dark_idx];
-        let black_bishops = counts[1][light_idx] + counts[1][dark_idx];
-        if let Some(color) = compare(white_bishops, black_bishops) {
-            return color;
-        }
-
-        let knight_idx = HbPieceRole::Knight as usize;
-        if let Some(color) = compare(counts[0][knight_idx], counts[1][knight_idx]) {
-            return color;
-        }
-
-        Color::White
+    fn into_normalized(self) -> Self {
+        [
+            self.clone(),
+            self.clone().into_mirrored_sides(),
+            self.clone().into_mirrored_left_to_right(),
+            self.clone()
+                .into_mirrored_sides()
+                .into_mirrored_left_to_right(),
+        ]
+        .into_iter()
+        .min()
+        .unwrap()
     }
 
     pub fn child_material_keys(&self) -> BTreeSet<MaterialKey> {
@@ -481,10 +376,24 @@ impl fmt::Display for MaterialKey {
     }
 }
 
+impl PartialOrd for MaterialKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MaterialKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.pawns
+            .cmp(&other.pawns)
+            .then_with(|| self.counts.cmp(&other.counts).reverse())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use insta::assert_debug_snapshot;
+    use insta::{assert_debug_snapshot, assert_snapshot};
     use proptest::{prelude::*, string::string_regex};
     use shakmaty::{CastlingMode, fen::Fen};
 
@@ -514,22 +423,22 @@ mod tests {
 
     #[test]
     fn parses_kqvk() {
-        assert_eq!(material_key("KQvK"), "KQvK");
+        assert_snapshot!(material_key("KQvK"), @"KQvK");
     }
 
     #[test]
     fn parses_light_and_dark_bishops() {
-        assert_eq!(material_key("KBdBlvK"), "KBdBlvK");
+        assert_snapshot!(material_key("KBdBlvK"), @"KBdBlvK");
     }
 
     #[test]
     fn canonicalizes_bishop_colors_in_material_key_1() {
-        assert_eq!(material_key("KBlvKBd"), "KBdvKBl");
+        assert_snapshot!(material_key("KBlvKBd"), @"KBlvKBd");
     }
 
     #[test]
     fn canonicalizes_bishop_colors_in_material_key_2() {
-        assert_eq!(material_key("KBlBlBdvK"), "KBdBdBlvK");
+        assert_snapshot!(material_key("KBlBlBdvK"), @"KBdBlBlvK");
     }
 
     #[test]
@@ -569,10 +478,10 @@ mod tests {
         assert_debug_snapshot!(children, @r#"
         [
             "KNvK",
-            "Ke4vK",
-            "Kd5vK",
-            "Ke5vKN",
-            "Kf5vK",
+            "KvKc4",
+            "KNvKd4",
+            "KvKd4",
+            "KvKd5",
         ]
         "#);
     }
@@ -604,9 +513,9 @@ mod tests {
 
         assert_debug_snapshot!(children, @r#"
         [
-            "KBdvK",
-            "Kd3vK",
-            "KBld4vK",
+            "KBlvK",
+            "KvKBdd5",
+            "KvKd6",
         ]
         "#);
     }
