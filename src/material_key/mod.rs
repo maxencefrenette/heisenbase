@@ -8,7 +8,7 @@ use std::{cmp::Ordering, collections::BTreeSet, fmt, iter::once};
 use winnow::ModalResult;
 use winnow::combinator::{alt, eof, fail, repeat, separated_pair, terminated};
 use winnow::prelude::*;
-use winnow::token::take;
+use winnow::token::{literal, take};
 
 pub use hb_piece::{HbPiece, HbPieceRole};
 
@@ -58,7 +58,6 @@ impl MaterialKey {
 
         fn token(input: &mut &[u8]) -> ModalResult<HbPieceRole> {
             alt((
-                'K'.value(HbPieceRole::King),
                 'Q'.value(HbPieceRole::Queen),
                 'R'.value(HbPieceRole::Rook),
                 'N'.value(HbPieceRole::Knight),
@@ -69,6 +68,8 @@ impl MaterialKey {
         }
 
         fn side(input: &mut &[u8]) -> ModalResult<([u8; HbPieceRole::ALL.len()], Bitboard)> {
+            literal("K").parse_next(input)?;
+
             let tokens: Vec<HbPieceRole> = repeat(0.., token).parse_next(input)?;
             let mut piece_counts = [0u8; HbPieceRole::ALL.len()];
             for role in tokens {
@@ -86,19 +87,15 @@ impl MaterialKey {
                 .parse_next(&mut input)
                 .ok()?;
 
-        let counts = ByColor {
+        let mut counts = ByColor {
             white: white_piece_counts,
             black: black_piece_counts,
         };
         let pawns = PawnStructure::new(white_pawns, black_pawns).ok()?;
 
-        // Check that both sides have a king
-        if Color::ALL
-            .into_iter()
-            .any(|color| counts[color][HbPieceRole::King as usize] == 0)
-        {
-            return None;
-        }
+        // Add kings
+        counts.white[HbPieceRole::King as usize] += 1;
+        counts.black[HbPieceRole::King as usize] += 1;
 
         Some(Self::new(counts, pawns))
     }
