@@ -10,6 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::{Result, anyhow};
 use flate2::read::MultiGzDecoder;
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
@@ -32,7 +33,7 @@ const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
 pub const RAW_PARQUET_PATH: &str = "./data/pgn_index_raw.parquet";
 pub const PARQUET_PATH: &str = "./data/pgn_index.parquet";
 
-pub fn run_stage1() -> io::Result<()> {
+pub fn run_stage1() -> Result<()> {
     let mut files = Vec::new();
     collect_pgn_files(Path::new(PGN_ROOT), &mut files)?;
     files.sort();
@@ -75,9 +76,9 @@ pub fn run_stage1() -> io::Result<()> {
     Ok(())
 }
 
-pub fn run_stage2() -> io::Result<()> {
+pub fn run_stage2() -> Result<()> {
     let mut df = LazyFrame::scan_parquet(RAW_PARQUET_PATH, Default::default())
-        .map_err(polars_to_io_error)?
+        .map_err(polars_to_anyhow)?
         .filter(col("num_games").gt(1))
         .with_column(
             col("material_key")
@@ -181,7 +182,7 @@ pub fn run_stage2() -> io::Result<()> {
             .alias("utility"),
         ])
         .collect()
-        .map_err(polars_to_io_error)?;
+        .map_err(polars_to_anyhow)?;
 
     if let Some(parent) = Path::new(PARQUET_PATH).parent() {
         fs::create_dir_all(parent)?;
@@ -190,7 +191,7 @@ pub fn run_stage2() -> io::Result<()> {
     let file = File::create(PARQUET_PATH)?;
     ParquetWriter::new(file)
         .finish(&mut df)
-        .map_err(polars_to_io_error)?;
+        .map_err(polars_to_anyhow)?;
 
     Ok(())
 }
@@ -201,7 +202,7 @@ fn process_reader<R: Read>(
     counts_positions: &mut HashMap<MaterialKey, u64>,
     total_positions: &mut u64,
     path: &Path,
-) -> io::Result<u64> {
+) -> Result<u64> {
     let mut reader = Reader::new(reader);
     let mut visitor = IndexVisitor {
         counts_games,
@@ -228,7 +229,7 @@ fn process_reader<R: Read>(
                 );
                 break;
             }
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.into()),
         }
     }
     skipped.report(path);
@@ -240,7 +241,7 @@ fn write_raw_index(
     counts_positions: &HashMap<MaterialKey, u64>,
     total_games: u64,
     total_positions: u64,
-) -> io::Result<()> {
+) -> Result<()> {
     let mut material_keys = Vec::with_capacity(entries.len());
     let mut counts_games = Vec::with_capacity(entries.len());
     let mut counts_positions_vec = Vec::with_capacity(entries.len());
@@ -265,47 +266,42 @@ fn write_raw_index(
         Series::new("total_games", total_games_vec),
         Series::new("total_positions", total_positions_vec),
     ])
-    .map_err(polars_to_io_error)?;
+    .map_err(polars_to_anyhow)?;
 
     let file = File::create(RAW_PARQUET_PATH)?;
     ParquetWriter::new(file)
         .finish(&mut df)
-        .map_err(polars_to_io_error)?;
+        .map_err(polars_to_anyhow)?;
 
     Ok(())
 }
 
-fn polars_to_io_error(err: PolarsError) -> io::Error {
-    io::Error::other(err.to_string())
+fn polars_to_anyhow(err: PolarsError) -> anyhow::Error {
+    anyhow::anyhow!(err.to_string())
 }
 
-fn material_key_size(key: &str) -> io::Result<u64> {
+fn material_key_size(key: &str) -> Result<u64> {
     let material = parse_material_key(key)?;
     Ok(PositionIndexer::new(material).total_positions() as u64)
 }
 
-fn material_key_num_pieces(key: &str) -> io::Result<u32> {
+fn material_key_num_pieces(key: &str) -> Result<u32> {
     let material = parse_material_key(key)?;
     Ok(material.total_piece_count())
 }
 
-fn material_key_num_pawns(key: &str) -> io::Result<u32> {
+fn material_key_num_pawns(key: &str) -> Result<u32> {
     let material = parse_material_key(key)?;
     Ok(material.pawns.pawn_count())
 }
 
-fn material_key_num_non_pawns(key: &str) -> io::Result<u32> {
+fn material_key_num_non_pawns(key: &str) -> Result<u32> {
     let material = parse_material_key(key)?;
     Ok(material.non_pawn_piece_count())
 }
 
-fn parse_material_key(key: &str) -> io::Result<MaterialKey> {
-    MaterialKey::from_string(key).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("invalid material_key: {key}"),
-        )
-    })
+fn parse_material_key(key: &str) -> Result<MaterialKey> {
+    MaterialKey::from_string(key).map_err(|err| anyhow!("invalid material_key: {key}: {err}"))
 }
 
 struct IndexVisitor<'a> {
@@ -323,7 +319,7 @@ struct GameState {
 impl<'a> Visitor for IndexVisitor<'a> {
     type Tags = Option<Chess>;
     type Movetext = GameState;
-    type Output = io::Result<()>;
+    type Output = Result<()>;
 
     fn begin_tags(&mut self) -> ControlFlow<Self::Output, Self::Tags> {
         ControlFlow::Continue(None)
@@ -342,7 +338,8 @@ impl<'a> Visitor for IndexVisitor<'a> {
                     return ControlFlow::Break(Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("invalid FEN tag: {err}"),
-                    )));
+                    )
+                    .into()));
                 }
             };
             let position = match fen.into_position(CastlingMode::Standard) {
@@ -351,7 +348,8 @@ impl<'a> Visitor for IndexVisitor<'a> {
                     return ControlFlow::Break(Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("invalid FEN position: {err}"),
-                    )));
+                    )
+                    .into()));
                 }
             };
             tags.replace(position);
@@ -390,7 +388,8 @@ impl<'a> Visitor for IndexVisitor<'a> {
                 return ControlFlow::Break(Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("illegal move: {err}"),
-                )));
+                )
+                .into()));
             }
         };
         movetext.position.play_unchecked(mv);
@@ -413,7 +412,7 @@ impl<'a> Visitor for IndexVisitor<'a> {
     }
 }
 
-fn collect_pgn_files(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
+fn collect_pgn_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -495,17 +494,26 @@ impl SkipStats {
     }
 }
 
-fn classify_skip_error(err: &io::Error, stats: &mut SkipStats) -> bool {
-    if is_illegal_move_error(err) {
+fn classify_skip_error(err: &anyhow::Error, stats: &mut SkipStats) -> bool {
+    let Some(io_err) = extract_io_error(err) else {
+        return false;
+    };
+
+    if is_illegal_move_error(io_err) {
         stats.illegal_moves += 1;
         true
-    } else if is_invalid_fen_tag_error(err) {
+    } else if is_invalid_fen_tag_error(io_err) {
         stats.invalid_fen_tags += 1;
         true
-    } else if is_invalid_fen_position_error(err) {
+    } else if is_invalid_fen_position_error(io_err) {
         stats.invalid_fen_positions += 1;
         true
     } else {
         false
     }
+}
+
+fn extract_io_error(err: &anyhow::Error) -> Option<&io::Error> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<io::Error>())
 }

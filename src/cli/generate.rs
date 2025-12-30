@@ -1,15 +1,16 @@
 use duckdb::{Connection, params};
 use polars::prelude::*;
-use std::{error::Error, fs, io, path::Path};
+use std::{fs, path::Path};
 
 use super::index_pgn;
+use anyhow::{Result, anyhow};
 use heisenbase::material_key::MaterialKey;
 use heisenbase::table_builder::TableBuilder;
 use heisenbase::wdl_file::write_wdl_file;
 use heisenbase::wdl_score_range::WdlScoreRange;
 use heisenbase::wdl_table::WdlTable;
 
-pub(crate) fn run_generate(material: MaterialKey) -> io::Result<()> {
+pub(crate) fn run_generate(material: MaterialKey) -> Result<()> {
     let mut table_builder = TableBuilder::new(material);
     let loaded: Vec<String> = table_builder
         .loaded_child_materials()
@@ -66,14 +67,13 @@ pub(crate) fn run_generate(material: MaterialKey) -> io::Result<()> {
     fs::create_dir_all(heisenbase_dir)?;
     let filename = heisenbase_dir.join(format!("{}.hbt", wdl_table.material));
     write_wdl_file(&filename, &wdl_table)?;
-    log_stats_to_index(&wdl_table, &counts)
-        .map_err(|err| io::Error::other(format!("index logging failed: {err}")))?;
+    log_stats_to_index(&wdl_table, &counts)?;
     println!("Wrote table to {}", filename.display());
     println!();
     Ok(())
 }
 
-fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<(), Box<dyn Error>> {
+fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
     let heisenbase_dir = Path::new("./data/heisenbase");
     fs::create_dir_all(heisenbase_dir)?;
 
@@ -129,9 +129,8 @@ fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<(), B
     Ok(())
 }
 
-pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), Box<dyn Error>> {
-    let df = LazyFrame::scan_parquet(index_pgn::PARQUET_PATH, Default::default())
-        .unwrap()
+pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<()> {
+    let df = LazyFrame::scan_parquet(index_pgn::PARQUET_PATH, Default::default())?
         .filter(col("num_games").gt(1))
         .with_columns([
             (lit(1_000_000_000f64) * col("num_positions").cast(DataType::Float64)
@@ -143,15 +142,15 @@ pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), B
             ["utility"],
             SortMultipleOptions::new().with_order_descending(true),
         )
-        .collect()
-        .unwrap();
+        .collect()?;
 
-    let keys = df.column("material_key").unwrap();
+    let keys = df.column("material_key")?;
 
     let mut candidates = Vec::new();
-    for key in keys.str().unwrap().into_iter() {
-        let material_key = MaterialKey::from_string(key.expect("material_key null"))
-            .expect("invalid material key");
+    for key in keys.str()?.into_iter() {
+        let key = key.ok_or_else(|| anyhow!("material_key is null"))?;
+        let material_key = MaterialKey::from_string(key)
+            .map_err(|err| anyhow!("invalid material key: {key}: {err}"))?;
         if material_key.total_piece_count() > max_pieces {
             continue;
         }
@@ -181,11 +180,7 @@ pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<(), B
             continue;
         }
         println!("Generating {}", material_str);
-        if let Err(err) = run_generate(material_key) {
-            return Err(
-                io::Error::other(format!("failed to generate {}: {}", material_str, err)).into(),
-            );
-        }
+        run_generate(material_key)?;
     }
 
     Ok(())

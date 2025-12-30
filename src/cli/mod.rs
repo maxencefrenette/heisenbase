@@ -6,8 +6,9 @@ use clap::{Parser, Subcommand};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use shakmaty::{Chess, EnPassantMode, fen::Fen};
 use shakmaty_syzygy::{SyzygyError, Tablebase, Wdl};
-use std::{collections::HashSet, error::Error, fs, io, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
+use anyhow::{Result, anyhow, bail};
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
 use heisenbase::wdl_file::read_wdl_file;
@@ -48,33 +49,32 @@ enum Commands {
 }
 
 /// Parse CLI arguments and execute the requested command.
-pub fn run() -> Result<(), String> {
+pub fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Generate { material_key } => {
-            let material = MaterialKey::from_string(&material_key).expect("invalid material key");
-            generate::run_generate(material).map_err(|err| format!("generate failed: {err}"))?;
+            let material = MaterialKey::from_string(&material_key)
+                .map_err(|err| anyhow!("invalid material key: {material_key}: {err}"))?;
+            generate::run_generate(material)?;
         }
         Commands::GenerateMany {
             min_games,
             max_pieces,
         } => {
-            generate::run_generate_many(min_games, max_pieces)
-                .map_err(|err| format!("generate-many failed: {err}"))?;
+            generate::run_generate_many(min_games, max_pieces)?;
         }
         Commands::PgnIndexStage1 => {
-            index_pgn::run_stage1().map_err(|err| format!("pgn-index-stage1 failed: {err}"))?;
+            index_pgn::run_stage1()?;
         }
         Commands::PgnIndexStage2 => {
-            index_pgn::run_stage2().map_err(|err| format!("pgn-index-stage2 failed: {err}"))?;
+            index_pgn::run_stage2()?;
         }
         Commands::CheckAgainstSyzygy => {
-            run_check_against_syzygy()
-                .map_err(|err| format!("check-against-syzygy failed: {err}"))?;
+            run_check_against_syzygy()?;
         }
         Commands::IndexInit => {
-            index::run_index_init().map_err(|err| format!("index-init failed: {err}"))?;
+            index::run_index_init()?;
         }
     }
 
@@ -111,7 +111,7 @@ fn heisenbase_allows(wdl: WdlScoreRange, syzygy: SimpleWdl) -> bool {
     }
 }
 
-fn material_keys_from_dir(dir: &Path) -> Result<Vec<MaterialKey>, Box<dyn Error>> {
+fn material_keys_from_dir(dir: &Path) -> Result<Vec<MaterialKey>> {
     let mut keys = HashSet::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -148,18 +148,14 @@ fn collect_valid_indices(indexer: &PositionIndexer) -> Vec<usize> {
     valid
 }
 
-fn run_check_against_syzygy() -> Result<(), Box<dyn Error>> {
+fn run_check_against_syzygy() -> Result<()> {
     let heisenbase_dir = Path::new("./data/heisenbase");
     let syzygy_dir = Path::new("./data/syzygy");
 
     let mut tablebase = Tablebase::<Chess>::new();
     let added = tablebase.add_directory(syzygy_dir)?;
     if added == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("no syzygy tables found in {}", syzygy_dir.display()),
-        )
-        .into());
+        bail!("no syzygy tables found in {}", syzygy_dir.display());
     }
 
     let all_keys = material_keys_from_dir(heisenbase_dir)?;
@@ -278,7 +274,7 @@ fn run_check_against_syzygy() -> Result<(), Box<dyn Error>> {
     }
 
     if total_mismatches > 0 || missing_tables > 0 || probe_errors > 0 {
-        return Err(io::Error::other("syzygy comparison reported mismatches or errors").into());
+        bail!("syzygy comparison reported mismatches or errors");
     }
 
     Ok(())

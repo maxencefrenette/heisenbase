@@ -1,7 +1,9 @@
 use duckdb::Connection;
-use std::{error::Error, fs, path::Path};
+use std::{fs, path::Path};
 
-pub fn run_index_init() -> Result<(), Box<dyn Error>> {
+use anyhow::Result;
+
+pub fn run_index_init() -> Result<()> {
     let heisenbase_dir = Path::new("./data/heisenbase");
     fs::create_dir_all(heisenbase_dir)?;
 
