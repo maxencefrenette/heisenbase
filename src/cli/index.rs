@@ -13,6 +13,9 @@ pub fn run_index_init() -> Result<()> {
         "CREATE TABLE IF NOT EXISTS material_keys (
             name VARCHAR,
             children VARCHAR[],
+            num_pieces INTEGER,
+            num_pawns INTEGER,
+            num_non_pawns INTEGER,
             total INTEGER,
             illegal INTEGER,
             win INTEGER,
@@ -22,6 +25,18 @@ pub fn run_index_init() -> Result<()> {
             draw_or_loss INTEGER,
             unknown INTEGER
         )",
+        [],
+    )?;
+    conn.execute(
+        "ALTER TABLE material_keys ADD COLUMN IF NOT EXISTS num_pieces INTEGER",
+        [],
+    )?;
+    conn.execute(
+        "ALTER TABLE material_keys ADD COLUMN IF NOT EXISTS num_pawns INTEGER",
+        [],
+    )?;
+    conn.execute(
+        "ALTER TABLE material_keys ADD COLUMN IF NOT EXISTS num_non_pawns INTEGER",
         [],
     )?;
 

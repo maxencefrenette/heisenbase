@@ -86,6 +86,9 @@ fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
     children.sort();
 
     let name = wdl_table.material.to_string();
+    let num_pieces = wdl_table.material.total_piece_count() as i64;
+    let num_pawns = wdl_table.material.pawns.pawn_count() as i64;
+    let num_non_pawns = wdl_table.material.non_pawn_piece_count() as i64;
     let total = wdl_table.positions.len() as i64;
     let children_literal = if children.is_empty() {
         "[]".to_string()
@@ -104,6 +107,9 @@ fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
         "INSERT INTO material_keys (
             name,
             children,
+            num_pieces,
+            num_pawns,
+            num_non_pawns,
             total,
             illegal,
             win,
@@ -112,9 +118,12 @@ fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
             win_or_draw,
             draw_or_loss,
             unknown
-        ) VALUES ('{}', {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        ) VALUES ('{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
         name.replace('\'', "''"),
         children_literal,
+        num_pieces,
+        num_pawns,
+        num_non_pawns,
         total,
         counts[WdlScoreRange::IllegalPosition as usize],
         counts[WdlScoreRange::Win as usize],
