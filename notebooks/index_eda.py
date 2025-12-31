@@ -82,5 +82,44 @@ def _(alt, counts, pd):
     return
 
 
+@app.cell
+def _(alt, df, mo):
+    _df = (
+        df
+            .groupby("num_pieces")
+            .agg(
+                win = ("win", "sum"),
+                draw = ("draw", "sum"),
+                loss = ("loss", "sum"),
+                win_or_draw = ("win_or_draw", "sum"),
+                draw_or_loss = ("draw_or_loss", "sum"),
+            )
+            .reset_index()
+    )
+    _df["solved_positions"] = _df["win"] + _df["draw"] + _df["loss"]
+    _df["partially_solved_positions"] = _df["solved_positions"] + _df["win_or_draw"] + _df["draw_or_loss"]
+
+
+    mo.output.append(
+        alt.Chart(_df, title=f"Solved positions by piece count in current tablebase")
+            .mark_bar()
+            .encode(
+                x=alt.X('num_pieces:N'),
+                y=alt.Y('solved_positions'),
+            )
+    )
+
+    mo.output.append(
+        alt.Chart(_df, title=f"Partially solved positions by piece count in current tablebase")
+            .mark_bar()
+            .encode(
+                x=alt.X('num_pieces:N'),
+                y=alt.Y('partially_solved_positions'),
+            )
+    )
+
+    return
+
+
 if __name__ == "__main__":
     app.run()
