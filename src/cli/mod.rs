@@ -8,7 +8,7 @@ use shakmaty::{Chess, EnPassantMode, fen::Fen};
 use shakmaty_syzygy::{SyzygyError, Tablebase, Wdl};
 use std::{collections::HashSet, fs, path::Path};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
 use heisenbase::wdl_file::read_wdl_file;
@@ -186,7 +186,9 @@ fn run_check_against_syzygy() -> Result<()> {
         for material in keys {
             total_tables += 1;
             let table_path = heisenbase_dir.join(format!("{}.hbt", material));
-            let table = read_wdl_file(&table_path)?;
+            let table = read_wdl_file(&table_path).with_context(|| {
+                format!("failed to read heisenbase table {}", table_path.display())
+            })?;
             let indexer = PositionIndexer::new(material.clone());
             let valid_indices = collect_valid_indices(&indexer);
             if valid_indices.is_empty() {
