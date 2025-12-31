@@ -44,7 +44,7 @@ enum Commands {
     /// Sample positions from heisenbase tables and compare against Syzygy WDL tables.
     CheckAgainstSyzygy,
     /// Initialize the DuckDB material key index.
-    #[command(name = "ìndex-init")]
+    #[command(name = "index-init")]
     IndexInit,
 }
 
