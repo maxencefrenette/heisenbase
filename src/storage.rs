@@ -45,7 +45,8 @@ pub fn init_db(conn: &Connection) -> Result<()> {
             loss INTEGER NOT NULL,
             win_or_draw INTEGER NOT NULL,
             draw_or_loss INTEGER NOT NULL,
-            unknown INTEGER NOT NULL
+            unknown INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS pgn_index_raw (
             material_key TEXT PRIMARY KEY,
