@@ -51,6 +51,7 @@ enum Commands {
 /// Parse CLI arguments and execute the requested command.
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    warn_if_debug_build(&cli.command);
 
     match cli.command {
         Commands::Generate { material_key } => {
@@ -79,6 +80,27 @@ pub fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn warn_if_debug_build(command: &Commands) {
+    if cfg!(debug_assertions) && command.is_long_running() {
+        eprintln!(
+            "Warning: this command is running in debug mode and may be very slow. Use a release build (`cargo run --release -- ...`) for long-running CLI commands."
+        );
+    }
+}
+
+impl Commands {
+    fn is_long_running(&self) -> bool {
+        matches!(
+            self,
+            Self::Generate { .. }
+                | Self::GenerateMany { .. }
+                | Self::PgnIndexStage1
+                | Self::PgnIndexStage2
+                | Self::CheckAgainstSyzygy
+        )
+    }
 }
 
 const SAMPLES_PER_TABLE: usize = 256;
@@ -259,4 +281,30 @@ fn run_check_against_syzygy() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Commands;
+
+    #[test]
+    fn classifies_long_running_commands() {
+        assert!(
+            Commands::Generate {
+                material_key: "KQvK".to_string(),
+            }
+            .is_long_running()
+        );
+        assert!(
+            Commands::GenerateMany {
+                min_games: 100,
+                max_pieces: 4,
+            }
+            .is_long_running()
+        );
+        assert!(Commands::PgnIndexStage1.is_long_running());
+        assert!(Commands::PgnIndexStage2.is_long_running());
+        assert!(Commands::CheckAgainstSyzygy.is_long_running());
+        assert!(!Commands::IndexInit.is_long_running());
+    }
 }
