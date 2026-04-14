@@ -1,6 +1,4 @@
-use std::fs::File;
-use std::io::{self, Read, Write};
-use std::path::Path;
+use std::io::{self, Cursor, Read};
 
 use crate::material_key::MaterialKey;
 use crate::wdl_table::WdlTable;
@@ -8,46 +6,36 @@ use crate::wdl_table::WdlTable;
 const MAGIC: &[u8; 4] = b"HBWD";
 const VERSION: u8 = 1;
 
-/// Write a compressed WDL table to a file.
-pub fn write_wdl_file<P: AsRef<Path>>(path: P, wdl_table: &WdlTable) -> io::Result<()> {
-    let mut file = File::create(path)?;
-
-    // Header
-    file.write_all(MAGIC)?;
-    file.write_all(&[VERSION])?;
-
-    // Material key
+pub fn encode_wdl_bytes(wdl_table: &WdlTable) -> io::Result<Vec<u8>> {
     let mk_string = wdl_table.material.to_string();
-    file.write_all(&[mk_string.len() as u8])?;
-    file.write_all(mk_string.as_bytes())?;
+    if mk_string.len() > u8::MAX as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "material key is too long to encode",
+        ));
+    }
 
-    // WdlTable
-    file.write_all(&wdl_table.positions.len().to_le_bytes())?;
-    file.write_all(
-        wdl_table
-            .positions
-            .iter()
-            .map(|&wdl| wdl.into())
-            .collect::<Vec<u8>>()
-            .as_slice(),
-    )?;
-
-    Ok(())
+    let mut bytes = Vec::with_capacity(4 + 1 + 1 + mk_string.len() + 8 + wdl_table.positions.len());
+    bytes.extend_from_slice(MAGIC);
+    bytes.push(VERSION);
+    bytes.push(mk_string.len() as u8);
+    bytes.extend_from_slice(mk_string.as_bytes());
+    bytes.extend_from_slice(&(wdl_table.positions.len() as u64).to_le_bytes());
+    bytes.extend(wdl_table.positions.iter().map(|&wdl| u8::from(wdl)));
+    Ok(bytes)
 }
 
-/// Read a compressed WDL table from a file.
-pub fn read_wdl_file<P: AsRef<Path>>(path: P) -> io::Result<WdlTable> {
-    let mut file = File::open(path)?;
+pub fn decode_wdl_bytes(bytes: &[u8]) -> io::Result<WdlTable> {
+    let mut cursor = Cursor::new(bytes);
 
-    // Header
     let mut magic = [0u8; 4];
-    file.read_exact(&mut magic)?;
+    cursor.read_exact(&mut magic)?;
     if &magic != MAGIC {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid magic"));
     }
 
     let mut version = [0u8; 1];
-    file.read_exact(&mut version)?;
+    cursor.read_exact(&mut version)?;
     if version[0] != VERSION {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -55,25 +43,25 @@ pub fn read_wdl_file<P: AsRef<Path>>(path: P) -> io::Result<WdlTable> {
         ));
     }
 
-    // Material key
     let mut mk_len = [0u8; 1];
-    file.read_exact(&mut mk_len)?;
-    let mk_len = mk_len[0] as usize;
-    let mut mk_bytes = vec![0u8; mk_len];
-    file.read_exact(&mut mk_bytes)?;
+    cursor.read_exact(&mut mk_len)?;
+    let mut mk_bytes = vec![0u8; mk_len[0] as usize];
+    cursor.read_exact(&mut mk_bytes)?;
     let mk_string = String::from_utf8(mk_bytes)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid material key"))?;
     let material = MaterialKey::from_string(&mk_string)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid material key"))?;
 
-    // WDL Table
-    let mut buf = [0u8; 8];
-    file.read_exact(&mut buf)?;
-    let wdl_table_len = u64::from_le_bytes(buf) as usize;
+    let mut len_buf = [0u8; 8];
+    cursor.read_exact(&mut len_buf)?;
+    let table_len = u64::from_le_bytes(len_buf) as usize;
 
-    let mut buf = vec![0u8; wdl_table_len];
-    file.read_exact(&mut buf)?;
-    let positions = buf.iter().map(|&num| num.try_into().unwrap()).collect();
+    let mut positions_buf = vec![0u8; table_len];
+    cursor.read_exact(&mut positions_buf)?;
+    let positions = positions_buf
+        .into_iter()
+        .map(|num| num.try_into().unwrap())
+        .collect();
 
     Ok(WdlTable {
         material,
@@ -84,32 +72,30 @@ pub fn read_wdl_file<P: AsRef<Path>>(path: P) -> io::Result<WdlTable> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
-    use std::io;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::material_key::MaterialKey;
+    use crate::position_indexer::PositionIndexer;
+    use crate::wdl_score_range::WdlScoreRange;
 
     #[test]
     fn read_wdl_file_rejects_bad_magic() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after UNIX_EPOCH")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("heisenbase_bad_magic_{unique}.hbt"));
-
-        {
-            let mut file = File::create(&path).expect("failed to create temporary file");
-            file.write_all(b"BAD!")
-                .expect("failed to write incorrect magic to temporary file");
-            file.write_all(&[0u8; 16])
-                .expect("failed to write placeholder data to temporary file");
-        }
-
-        let result = read_wdl_file(&path);
-        std::fs::remove_file(&path).expect("failed to remove temporary file");
-
+        let result = decode_wdl_bytes(b"BAD!\0\0\0\0\0\0\0\0\0");
         assert!(matches!(
             result,
             Err(ref e) if e.kind() == io::ErrorKind::InvalidData
         ));
+    }
+
+    #[test]
+    fn encode_decode_round_trip() {
+        let material = MaterialKey::from_string("KQvK").unwrap();
+        let positions =
+            vec![WdlScoreRange::Draw; PositionIndexer::new(material.clone()).total_positions()];
+        let table = WdlTable {
+            material,
+            positions,
+        };
+        let bytes = encode_wdl_bytes(&table).unwrap();
+        let decoded = decode_wdl_bytes(&bytes).unwrap();
+        assert_eq!(decoded, table);
     }
 }

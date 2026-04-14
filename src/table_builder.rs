@@ -1,7 +1,7 @@
 use crate::material_key::MaterialKey;
 use crate::position_indexer::{PositionIndexer, PositionMappingError};
 use crate::score::DtzScoreRange;
-use crate::wdl_file::read_wdl_file;
+use crate::storage;
 use crate::wdl_score_range::WdlScoreRange;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -21,33 +21,40 @@ pub struct TableBuilder {
 
 impl TableBuilder {
     pub fn new(material: MaterialKey) -> Self {
-        Self::with_data_dir(material, Path::new("./data/heisenbase"))
+        Self::with_db_path(material, Path::new(storage::DB_PATH))
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_data_dir<P: AsRef<Path>>(material: MaterialKey, data_dir: P) -> Self {
-        Self::with_data_dir(material, data_dir.as_ref())
+    pub(crate) fn new_with_db_path<P: AsRef<Path>>(material: MaterialKey, db_path: P) -> Self {
+        Self::with_db_path(material, db_path.as_ref())
     }
 
-    fn with_data_dir(material: MaterialKey, data_dir: &Path) -> Self {
+    fn with_db_path(material: MaterialKey, db_path: &Path) -> Self {
         let position_indexer = PositionIndexer::new(material.clone());
         let positions_len = position_indexer.total_positions();
         let mut child_tables = HashMap::new();
         let mut child_indexers = HashMap::new();
         let mut loaded_child_tables = Vec::new();
         let mut missing_child_tables = Vec::new();
+        let conn = storage::open_database_at_path(db_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to open sqlite database {}: {err}",
+                db_path.display()
+            )
+        });
 
         for child_key in material.child_material_keys() {
-            let path = data_dir.join(format!("{}.hbt", child_key));
-            match read_wdl_file(&path) {
-                Ok(table) => {
+            let table = storage::load_wdl_table(&conn, &child_key)
+                .unwrap_or_else(|err| panic!("failed to load child table {child_key}: {err}"));
+            match table {
+                Some(table) => {
                     child_tables.insert(child_key.clone(), table.positions);
                     child_indexers
                         .entry(child_key.clone())
                         .or_insert_with(|| PositionIndexer::new(child_key.clone()));
                     loaded_child_tables.push(child_key);
                 }
-                Err(_) => {
+                None => {
                     missing_child_tables.push(child_key);
                 }
             }
@@ -216,13 +223,13 @@ impl TableBuilder {
 mod tests {
     use super::*;
     use crate::position_indexer::PositionIndexer;
-    use crate::wdl_file::write_wdl_file;
+    use crate::storage;
     use crate::wdl_score_range::WdlScoreRange;
     use crate::wdl_table::WdlTable;
     use shakmaty::{CastlingMode, Role, Square, fen::Fen};
     use std::collections::HashMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn position_index_roundtrip() {
@@ -327,19 +334,26 @@ mod tests {
         assert_eq!(wdl, WdlScoreRange::Win);
     }
 
-    fn temp_data_dir(prefix: &str) -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("heisenbase_{prefix}_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_db_path(prefix: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "heisenbase_{prefix}_{}_table_builder.db",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        path
+    }
+
+    fn store_table(db_path: &Path, table: &WdlTable) {
+        let conn = storage::open_database_at_path(db_path).unwrap();
+        storage::store_wdl_table(&conn, table).unwrap();
     }
 
     #[test]
     fn child_tables_report_missing_when_unavailable() {
         let material = MaterialKey::from_string("KQvK").unwrap();
-        let data_dir = temp_data_dir("missing_child");
-        let tb = TableBuilder::new_with_data_dir(material, &data_dir);
+        let db_path = temp_db_path("missing_child");
+        let tb = TableBuilder::new_with_db_path(material, &db_path);
         assert!(tb.loaded_child_materials().is_empty());
         let missing: Vec<String> = tb
             .missing_child_materials()
@@ -347,13 +361,13 @@ mod tests {
             .map(|k| k.to_string())
             .collect();
         assert_eq!(missing, vec!["KvK".to_string()]);
-        fs::remove_dir_all(data_dir).unwrap();
+        let _ = fs::remove_file(db_path);
     }
 
     #[test]
     fn child_tables_load_available_files() {
         let material = MaterialKey::from_string("KQvK").unwrap();
-        let data_dir = temp_data_dir("load_child");
+        let db_path = temp_db_path("load_child");
 
         let child_key = MaterialKey::from_string("KvK").unwrap();
         let child_indexer = PositionIndexer::new(child_key.clone());
@@ -362,10 +376,9 @@ mod tests {
             material: child_key,
             positions,
         };
-        let path = data_dir.join("KvK.hbt");
-        write_wdl_file(&path, &kvk_wdl_table).unwrap();
+        store_table(&db_path, &kvk_wdl_table);
 
-        let tb = TableBuilder::new_with_data_dir(material, &data_dir);
+        let tb = TableBuilder::new_with_db_path(material, &db_path);
         let loaded: Vec<String> = tb
             .loaded_child_materials()
             .iter()
@@ -375,14 +388,13 @@ mod tests {
         assert!(tb.missing_child_materials().is_empty());
         assert!(tb.child_indexers.contains_key(&kvk_wdl_table.material));
 
-        fs::remove_file(path).unwrap();
-        fs::remove_dir_all(data_dir).unwrap();
+        let _ = fs::remove_file(db_path);
     }
 
     #[test]
     fn pawn_move_uses_child_table() {
         let material = MaterialKey::from_string("Ka2vK").unwrap();
-        let data_dir = temp_data_dir("pawn_move_child");
+        let db_path = temp_db_path("pawn_move_child");
 
         let child_key = MaterialKey::from_string("Ka3vK").unwrap();
         let child_indexer = PositionIndexer::new(child_key.clone());
@@ -391,10 +403,9 @@ mod tests {
             material: child_key,
             positions,
         };
-        let child_path = data_dir.join("Ka3vK.hbt");
-        write_wdl_file(&child_path, &child_table).unwrap();
+        store_table(&db_path, &child_table);
 
-        let tb = TableBuilder::new_with_data_dir(material, &data_dir);
+        let tb = TableBuilder::new_with_db_path(material, &db_path);
 
         let position: Chess = "8/8/8/8/8/8/P7/K6k w - - 0 1"
             .parse::<Fen>()
@@ -410,6 +421,6 @@ mod tests {
         let result = tb.evaluate_move(&tb.positions, &position, pawn_move);
         assert_eq!(result, DtzScoreRange::draw());
 
-        fs::remove_dir_all(data_dir).unwrap();
+        let _ = fs::remove_file(db_path);
     }
 }

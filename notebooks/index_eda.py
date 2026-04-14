@@ -11,6 +11,9 @@
 
 import marimo
 
+# NOTE: This notebook still targets the old DuckDB-based storage layout and
+# will not work until it is migrated to SQLite (`data/heisenbase.db`).
+
 __generated_with = "0.18.4"
 app = marimo.App()
 

@@ -8,7 +8,7 @@ As a test, the KQvK table can be generated with the following command:
 cargo run --release -- generate KQvK
 ```
 
-This command generates a file called `KQvK.hbt` in the `data/` directory.
+This command stores the generated table in `data/heisenbase.db`.
 
 ## Cutovers
 

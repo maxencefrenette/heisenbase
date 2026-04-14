@@ -6,12 +6,12 @@ use clap::{Parser, Subcommand};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use shakmaty::{Chess, EnPassantMode, fen::Fen};
 use shakmaty_syzygy::{SyzygyError, Tablebase, Wdl};
-use std::{collections::HashSet, fs, path::Path};
+use std::path::Path;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
-use heisenbase::wdl_file::read_wdl_file;
+use heisenbase::storage;
 use heisenbase::wdl_score_range::WdlScoreRange;
 
 #[derive(Parser)]
@@ -37,13 +37,13 @@ enum Commands {
         #[arg(long, required = true)]
         max_pieces: u32,
     },
-    /// Index fishtest PGN files into pgn_index_raw.parquet.
+    /// Index fishtest PGN files into the sqlite raw PGN index.
     PgnIndexStage1,
-    /// Build the filtered PGN index with derived columns.
+    /// Build the filtered sqlite PGN index with derived columns.
     PgnIndexStage2,
     /// Sample positions from heisenbase tables and compare against Syzygy WDL tables.
     CheckAgainstSyzygy,
-    /// Initialize the DuckDB material key index.
+    /// Initialize the sqlite database.
     #[command(name = "index-init")]
     IndexInit,
 }
@@ -111,30 +111,9 @@ fn heisenbase_allows(wdl: WdlScoreRange, syzygy: SimpleWdl) -> bool {
     }
 }
 
-fn material_keys_from_dir(dir: &Path) -> Result<Vec<MaterialKey>> {
-    let mut keys = HashSet::new();
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("hbt") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let Ok(key) = MaterialKey::from_string(stem) else {
-            eprintln!(
-                "Skipping unrecognized material key file: {}",
-                path.display()
-            );
-            continue;
-        };
-        keys.insert(key);
-    }
-
-    let mut keys: Vec<MaterialKey> = keys.into_iter().collect();
-    keys.sort();
-    Ok(keys)
+fn material_keys_from_db() -> Result<Vec<MaterialKey>> {
+    let conn = storage::open_database()?;
+    storage::list_wdl_table_keys(&conn)
 }
 
 fn collect_valid_indices(indexer: &PositionIndexer) -> Vec<usize> {
@@ -149,8 +128,8 @@ fn collect_valid_indices(indexer: &PositionIndexer) -> Vec<usize> {
 }
 
 fn run_check_against_syzygy() -> Result<()> {
-    let heisenbase_dir = Path::new("./data/heisenbase");
     let syzygy_dir = Path::new("./data/syzygy");
+    let conn = storage::open_database()?;
 
     let mut tablebase = Tablebase::<Chess>::new();
     let added = tablebase.add_directory(syzygy_dir)?;
@@ -158,7 +137,7 @@ fn run_check_against_syzygy() -> Result<()> {
         bail!("no syzygy tables found in {}", syzygy_dir.display());
     }
 
-    let all_keys = material_keys_from_dir(heisenbase_dir)?;
+    let all_keys = material_keys_from_db()?;
     let mut three_man = Vec::new();
     let mut four_man = Vec::new();
     for key in all_keys {
@@ -185,10 +164,10 @@ fn run_check_against_syzygy() -> Result<()> {
         );
         for material in keys {
             total_tables += 1;
-            let table_path = heisenbase_dir.join(format!("{}.hbt", material));
-            let table = read_wdl_file(&table_path).with_context(|| {
-                format!("failed to read heisenbase table {}", table_path.display())
-            })?;
+            let Some(table) = storage::load_wdl_table(&conn, &material)? else {
+                eprintln!("Missing heisenbase table for {}", material);
+                continue;
+            };
             let indexer = PositionIndexer::new(material.clone());
             let valid_indices = collect_valid_indices(&indexer);
             if valid_indices.is_empty() {

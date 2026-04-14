@@ -1,5 +1,5 @@
 /// Contains the code to index PGN files to find the most common material keys.
-/// Stores the results in Parquet files.
+/// Stores the results in sqlite tables.
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -14,14 +14,9 @@ use anyhow::{Result, anyhow};
 use flate2::read::MultiGzDecoder;
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
+use heisenbase::storage;
 use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
-use polars::{
-    error::PolarsError,
-    prelude::{
-        DataFrame, DataType, GetOutput, IntoSeries, LazyFrame, NamedFrom, NewChunkedArray,
-        ParquetWriter, Series, UInt32Chunked, UInt64Chunked, col, lit,
-    },
-};
+use rusqlite::params;
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 
 const PGN_ROOT: &str = "./data/fishtest_pgns";
@@ -30,8 +25,6 @@ const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
 const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
 const INVALID_FEN_POSITION_PREFIX: &str = "invalid FEN position:";
 const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
-pub const RAW_PARQUET_PATH: &str = "./data/pgn_index_raw.parquet";
-pub const PARQUET_PATH: &str = "./data/pgn_index.parquet";
 
 pub fn run_stage1() -> Result<()> {
     let mut files = Vec::new();
@@ -72,126 +65,79 @@ pub fn run_stage1() -> Result<()> {
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     write_raw_index(&entries, &counts_positions, total_games, total_positions)?;
-
     Ok(())
 }
 
 pub fn run_stage2() -> Result<()> {
-    let mut df = LazyFrame::scan_parquet(RAW_PARQUET_PATH, Default::default())
-        .map_err(polars_to_anyhow)?
-        .filter(col("num_games").gt(1))
-        .with_column(
-            col("material_key")
-                .map(
-                    |s| {
-                        let keys = s.str()?;
-                        let mut sizes = Vec::with_capacity(keys.len());
-                        for key in keys.into_iter() {
-                            let key = key.ok_or_else(|| {
-                                PolarsError::ComputeError("material_key is null".into())
-                            })?;
-                            let size = material_key_size(key)
-                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
-                            sizes.push(Some(size));
-                        }
-                        Ok(Some(
-                            UInt64Chunked::from_iter_options(
-                                "material_key_size",
-                                sizes.into_iter(),
-                            )
-                            .into_series(),
-                        ))
-                    },
-                    GetOutput::from_type(DataType::UInt64),
-                )
-                .alias("material_key_size"),
-        )
-        .with_column(
-            col("material_key")
-                .map(
-                    |s| {
-                        let keys = s.str()?;
-                        let mut counts = Vec::with_capacity(keys.len());
-                        for key in keys.into_iter() {
-                            let key = key.ok_or_else(|| {
-                                PolarsError::ComputeError("material_key is null".into())
-                            })?;
-                            let count = material_key_num_pieces(key)
-                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
-                            counts.push(Some(count));
-                        }
-                        Ok(Some(
-                            UInt32Chunked::from_iter_options("num_pieces", counts.into_iter())
-                                .into_series(),
-                        ))
-                    },
-                    GetOutput::from_type(DataType::UInt32),
-                )
-                .alias("num_pieces"),
-        )
-        .with_column(
-            col("material_key")
-                .map(
-                    |s| {
-                        let keys = s.str()?;
-                        let mut counts = Vec::with_capacity(keys.len());
-                        for key in keys.into_iter() {
-                            let key = key.ok_or_else(|| {
-                                PolarsError::ComputeError("material_key is null".into())
-                            })?;
-                            let count = material_key_num_pawns(key)
-                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
-                            counts.push(Some(count));
-                        }
-                        Ok(Some(
-                            UInt32Chunked::from_iter_options("num_pawns", counts.into_iter())
-                                .into_series(),
-                        ))
-                    },
-                    GetOutput::from_type(DataType::UInt32),
-                )
-                .alias("num_pawns"),
-        )
-        .with_column(
-            col("material_key")
-                .map(
-                    |s| {
-                        let keys = s.str()?;
-                        let mut counts = Vec::with_capacity(keys.len());
-                        for key in keys.into_iter() {
-                            let key = key.ok_or_else(|| {
-                                PolarsError::ComputeError("material_key is null".into())
-                            })?;
-                            let count = material_key_num_non_pawns(key)
-                                .map_err(|err| PolarsError::ComputeError(err.to_string().into()))?;
-                            counts.push(Some(count));
-                        }
-                        Ok(Some(
-                            UInt32Chunked::from_iter_options("num_non_pawns", counts.into_iter())
-                                .into_series(),
-                        ))
-                    },
-                    GetOutput::from_type(DataType::UInt32),
-                )
-                .alias("num_non_pawns"),
-        )
-        .with_columns([
-            (lit(1_000_000_000f64) * col("num_positions").cast(DataType::Float64)
-                / col("total_positions").cast(DataType::Float64)
-                / col("material_key_size").cast(DataType::Float64))
-            .alias("utility"),
-        ])
-        .collect()
-        .map_err(polars_to_anyhow)?;
+    let mut conn = storage::open_database()?;
+    let entries = {
+        let mut stmt = conn.prepare(
+            "SELECT material_key, num_games, num_positions, total_games, total_positions
+             FROM pgn_index_raw
+             WHERE num_games > 1",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
 
-    if let Some(parent) = Path::new(PARQUET_PATH).parent() {
-        fs::create_dir_all(parent)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        entries
+    };
+
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM pgn_index", [])?;
+    let mut insert = tx.prepare(
+        "INSERT INTO pgn_index (
+            material_key,
+            num_games,
+            num_positions,
+            total_games,
+            total_positions,
+            material_key_size,
+            num_pieces,
+            num_pawns,
+            num_non_pawns,
+            utility
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )?;
+
+    for (material_key, num_games, num_positions, total_games, total_positions) in entries {
+        let material = parse_material_key(&material_key)?;
+        let material_key_size = PositionIndexer::new(material.clone()).total_positions() as i64;
+        let num_pieces = material.total_piece_count() as i64;
+        let num_pawns = material.pawns.pawn_count() as i64;
+        let num_non_pawns = material.non_pawn_piece_count() as i64;
+        let utility = if total_positions > 0 {
+            1_000_000_000f64 * num_positions as f64
+                / total_positions as f64
+                / material_key_size as f64
+        } else {
+            0.0
+        };
+        insert.execute(params![
+            material_key,
+            num_games,
+            num_positions,
+            total_games,
+            total_positions,
+            material_key_size,
+            num_pieces,
+            num_pawns,
+            num_non_pawns,
+            utility,
+        ])?;
     }
-
-    let file = File::create(PARQUET_PATH)?;
-    ParquetWriter::new(file)
-        .finish(&mut df)
-        .map_err(polars_to_anyhow)?;
+    drop(insert);
+    tx.commit()?;
 
     Ok(())
 }
@@ -242,62 +188,32 @@ fn write_raw_index(
     total_games: u64,
     total_positions: u64,
 ) -> Result<()> {
-    let mut material_keys = Vec::with_capacity(entries.len());
-    let mut counts_games = Vec::with_capacity(entries.len());
-    let mut counts_positions_vec = Vec::with_capacity(entries.len());
-    let mut total_games_vec = Vec::with_capacity(entries.len());
-    let mut total_positions_vec = Vec::with_capacity(entries.len());
+    let mut conn = storage::open_database()?;
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM pgn_index_raw", [])?;
+    let mut insert = tx.prepare(
+        "INSERT INTO pgn_index_raw (
+            material_key,
+            num_games,
+            num_positions,
+            total_games,
+            total_positions
+        ) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+
     for (key, count_games) in entries {
-        material_keys.push(key.to_string());
-        counts_games.push(*count_games);
-        counts_positions_vec.push(*counts_positions.get(key).unwrap_or(&0));
-        total_games_vec.push(total_games);
-        total_positions_vec.push(total_positions);
+        insert.execute(params![
+            key.to_string(),
+            *count_games as i64,
+            *counts_positions.get(key).unwrap_or(&0) as i64,
+            total_games as i64,
+            total_positions as i64,
+        ])?;
     }
 
-    if let Some(parent) = Path::new(RAW_PARQUET_PATH).parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let mut df = DataFrame::new(vec![
-        Series::new("material_key", material_keys),
-        Series::new("num_games", counts_games),
-        Series::new("num_positions", counts_positions_vec),
-        Series::new("total_games", total_games_vec),
-        Series::new("total_positions", total_positions_vec),
-    ])
-    .map_err(polars_to_anyhow)?;
-
-    let file = File::create(RAW_PARQUET_PATH)?;
-    ParquetWriter::new(file)
-        .finish(&mut df)
-        .map_err(polars_to_anyhow)?;
-
+    drop(insert);
+    tx.commit()?;
     Ok(())
-}
-
-fn polars_to_anyhow(err: PolarsError) -> anyhow::Error {
-    anyhow::anyhow!(err.to_string())
-}
-
-fn material_key_size(key: &str) -> Result<u64> {
-    let material = parse_material_key(key)?;
-    Ok(PositionIndexer::new(material).total_positions() as u64)
-}
-
-fn material_key_num_pieces(key: &str) -> Result<u32> {
-    let material = parse_material_key(key)?;
-    Ok(material.total_piece_count())
-}
-
-fn material_key_num_pawns(key: &str) -> Result<u32> {
-    let material = parse_material_key(key)?;
-    Ok(material.pawns.pawn_count())
-}
-
-fn material_key_num_non_pawns(key: &str) -> Result<u32> {
-    let material = parse_material_key(key)?;
-    Ok(material.non_pawn_piece_count())
 }
 
 fn parse_material_key(key: &str) -> Result<MaterialKey> {

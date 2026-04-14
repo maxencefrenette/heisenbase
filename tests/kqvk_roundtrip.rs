@@ -1,14 +1,12 @@
-// These tests cover the full WDL roundtrip pipeline: one isolates the in-memory
-// compression codec, the other (ignored) layers the file format and metadata on top.
+// These tests cover the WDL roundtrip codec directly.
 use heisenbase::{
     material_key::MaterialKey,
     position_indexer::PositionIndexer,
-    wdl_file::{read_wdl_file, write_wdl_file},
+    wdl_file::{decode_wdl_bytes, encode_wdl_bytes},
     wdl_score_range::WdlScoreRange,
     wdl_table::WdlTable,
 };
 use shakmaty::Position;
-use std::fs;
 
 fn build_kqvk_table_one_iteration() -> WdlTable {
     let material = MaterialKey::from_string("KQvK").unwrap();
@@ -41,13 +39,7 @@ fn build_kqvk_table_one_iteration() -> WdlTable {
 #[ignore]
 fn write_read_round_trip() {
     let table = build_kqvk_table_one_iteration();
-
-    let mut path = std::env::temp_dir();
-    path.push("kqvk_test.hbt");
-    write_wdl_file(&path, &table).unwrap();
-
-    let read_table = read_wdl_file(&path).unwrap();
+    let bytes = encode_wdl_bytes(&table).unwrap();
+    let read_table = decode_wdl_bytes(&bytes).unwrap();
     assert_eq!(read_table, table);
-
-    fs::remove_file(path).unwrap();
 }
