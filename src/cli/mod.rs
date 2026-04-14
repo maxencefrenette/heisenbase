@@ -17,7 +17,12 @@ use heisenbase::storage::Database;
 use heisenbase::wdl_score_range::WdlScoreRange;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version,
+    about = "Generate and analyze a sparse SQLite-backed chess tablebase",
+    long_about = "Generate and analyze a sparse SQLite-backed chess tablebase. Commands cover table generation, PGN indexing, Syzygy comparison, and database stats."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -308,7 +313,8 @@ fn run_check_against_syzygy() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Commands, PgnIndexArgs};
+    use super::{Cli, Commands, PgnIndexArgs};
+    use clap::{Arg, Command, CommandFactory};
 
     #[test]
     fn classifies_long_running_commands() {
@@ -334,5 +340,56 @@ mod tests {
         );
         assert!(Commands::CheckAgainstSyzygy.is_long_running());
         assert!(!Commands::IndexInit.is_long_running());
+    }
+
+    #[test]
+    fn every_command_has_help_text() {
+        let command = Cli::command();
+        assert_command_help(&command, "heisenbase");
+    }
+
+    #[test]
+    fn every_argument_has_help_text() {
+        let command = Cli::command();
+        assert_argument_help(&command, "heisenbase");
+    }
+
+    fn assert_command_help(command: &Command, path: &str) {
+        let has_help = command.get_about().is_some() || command.get_long_about().is_some();
+        assert!(has_help, "command `{path}` is missing help text");
+
+        for subcommand in command.get_subcommands() {
+            if subcommand.get_name() == "help" {
+                continue;
+            }
+            let sub_path = format!("{path} {}", subcommand.get_name());
+            assert_command_help(subcommand, &sub_path);
+        }
+    }
+
+    fn assert_argument_help(command: &Command, path: &str) {
+        for arg in command.get_arguments() {
+            if is_auto_arg(arg) {
+                continue;
+            }
+            let has_help = arg.get_help().is_some() || arg.get_long_help().is_some();
+            assert!(
+                has_help,
+                "argument `{}` on command `{path}` is missing help text",
+                arg.get_id()
+            );
+        }
+
+        for subcommand in command.get_subcommands() {
+            if subcommand.get_name() == "help" {
+                continue;
+            }
+            let sub_path = format!("{path} {}", subcommand.get_name());
+            assert_argument_help(subcommand, &sub_path);
+        }
+    }
+
+    fn is_auto_arg(arg: &Arg) -> bool {
+        matches!(arg.get_id().as_str(), "help" | "version")
     }
 }
