@@ -1,5 +1,6 @@
 use duckdb::{Connection, params};
 use polars::prelude::*;
+use std::ops::Not;
 use std::{fs, path::Path};
 
 use super::index_pgn;
@@ -139,49 +140,23 @@ fn log_stats_to_index(wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
 }
 
 pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<()> {
-    let df = LazyFrame::scan_parquet(index_pgn::PARQUET_PATH, Default::default())?
-        .filter(col("num_games").gt(1))
-        .with_columns([
-            (lit(1_000_000_000f64) * col("num_positions").cast(DataType::Float64)
-                / col("total_positions").cast(DataType::Float64)
-                / col("material_key_size").cast(DataType::Float64))
-            .alias("utility"),
-        ])
-        .sort(
-            ["utility"],
-            SortMultipleOptions::new().with_order_descending(true),
-        )
-        .collect()?;
-
-    let keys = df.column("material_key")?;
-
-    let mut candidates = Vec::new();
-    for key in keys.str()?.into_iter() {
-        let key = key.ok_or_else(|| anyhow!("material_key is null"))?;
-        let material_key = MaterialKey::from_string(key)
-            .map_err(|err| anyhow!("invalid material key: {key}: {err}"))?;
-        if material_key.total_piece_count() > max_pieces {
-            continue;
+    loop {
+        let candidates = compute_transitive_utility_candidates(min_games, max_pieces)?;
+        let mut next = None;
+        for candidate in candidates {
+            let filename = format!("./data/heisenbase/{}.hbt", candidate);
+            if !Path::new(&filename).exists() {
+                next = Some(candidate);
+                break;
+            }
         }
-        candidates.push(material_key);
-    }
-
-    if candidates.is_empty() {
-        println!(
-            "No material keys matched filters (min-games: {}, max-pieces: {}).",
-            min_games, max_pieces
-        );
-        return Ok(());
-    }
-
-    println!(
-        "Generating {} material keys (min-games: {}, max-pieces: {}).",
-        candidates.len(),
-        min_games,
-        max_pieces
-    );
-
-    for material_key in candidates {
+        let Some(material_key) = next else {
+            println!(
+                "No material keys matched filters (min-games: {}, max-pieces: {}).",
+                min_games, max_pieces
+            );
+            break;
+        };
         let material_str = material_key.to_string();
         let filename = format!("./data/heisenbase/{}.hbt", material_str);
         if Path::new(&filename).exists() {
@@ -193,4 +168,162 @@ pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn compute_transitive_utility_candidates(
+    min_games: u64,
+    max_pieces: u32,
+) -> Result<Vec<MaterialKey>> {
+    let material_df = load_material_keys_df()?;
+    let transitive_df = compute_transitive_utility_df(&material_df)?;
+    let pgn_df = LazyFrame::scan_parquet(index_pgn::PARQUET_PATH, Default::default())?
+        .filter(
+            col("num_games")
+                .cast(DataType::Int64)
+                .gt(lit(min_games as i64)),
+        )
+        .filter(
+            col("num_pieces")
+                .cast(DataType::Int64)
+                .lt_eq(lit(max_pieces as i64)),
+        )
+        .collect()?;
+    let joined = pgn_df.join(
+        &transitive_df,
+        ["material_key"],
+        ["material_key"],
+        JoinArgs::new(JoinType::Left),
+    )?;
+    let joined = joined
+        .lazy()
+        .with_columns([col("transitive_utility").fill_null(lit(0.0))])
+        .collect()?;
+    let sorted = joined.sort(
+        ["transitive_utility"],
+        SortMultipleOptions::new().with_order_descending(true),
+    )?;
+    let keys = sorted.column("material_key")?.str()?;
+    let mut candidates = Vec::with_capacity(keys.len());
+    for key in keys.into_iter() {
+        let key = key.ok_or_else(|| anyhow!("material_key is null"))?;
+        let material_key = MaterialKey::from_string(key)
+            .map_err(|err| anyhow!("invalid material key: {key}: {err}"))?;
+        candidates.push(material_key);
+    }
+    Ok(candidates)
+}
+
+fn load_material_keys_df() -> Result<DataFrame> {
+    let conn = Connection::open("./data/heisenbase/index.duckdb")?;
+    let mut stmt = conn.prepare(
+        "SELECT name, to_json(children) AS children_json, unknown, win_or_draw, draw_or_loss \
+         FROM material_keys",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let name: String = row.get(0)?;
+        let children_json: String = row.get(1)?;
+        let unknown: i64 = row.get(2)?;
+        let win_or_draw: i64 = row.get(3)?;
+        let draw_or_loss: i64 = row.get(4)?;
+        Ok((name, children_json, unknown, win_or_draw, draw_or_loss))
+    })?;
+
+    let mut names = Vec::new();
+    let mut children = Vec::new();
+    let mut unresolved = Vec::new();
+    for row in rows {
+        let (name, children_json, unknown, win_or_draw, draw_or_loss) = row?;
+        let parsed: Vec<String> = serde_json::from_str(&children_json)
+            .map_err(|err| anyhow!("invalid children JSON for {name}: {err}"))?;
+        names.push(name);
+        unresolved.push((unknown + win_or_draw + draw_or_loss) as f64);
+        children.push(parsed);
+    }
+    let child_counts: Vec<i64> = children.iter().map(|c| c.len() as i64).collect();
+    let total_children: usize = child_counts.iter().map(|count| *count as usize).sum();
+    let mut children_builder =
+        ListStringChunkedBuilder::new("children", children.len(), total_children);
+    for list in &children {
+        children_builder.append_values_iter(list.iter().map(|s| s.as_str()));
+    }
+    let children_series = children_builder.finish().into_series();
+
+    Ok(DataFrame::new(vec![
+        Series::new("name", names),
+        children_series,
+        Series::new("unresolved", unresolved),
+        Series::new("child_count", child_counts),
+    ])?)
+}
+
+fn compute_transitive_utility_df(material_df: &DataFrame) -> Result<DataFrame> {
+    let edges = material_df
+        .clone()
+        .lazy()
+        .filter(col("child_count").gt(lit(0)))
+        .explode(["children"])
+        .select([
+            col("children").alias("child"),
+            (col("unresolved") / col("child_count").cast(DataType::Float64)).alias("share"),
+        ])
+        .collect()?;
+
+    let mut current = edges;
+    let mut terminals: Vec<DataFrame> = Vec::new();
+    let material_lf = material_df.clone().lazy();
+
+    loop {
+        if current.height() == 0 {
+            break;
+        }
+        let joined = current
+            .lazy()
+            .join(
+                material_lf.clone(),
+                [col("child")],
+                [col("name")],
+                JoinArgs::new(JoinType::Left),
+            )
+            .collect()?;
+        let children_col = joined.column("children")?;
+        let missing_mask = children_col.is_null();
+        let missing = joined.filter(&missing_mask)?;
+        if missing.height() > 0 {
+            terminals.push(missing.select(["child", "share"])?);
+        }
+        let present_mask = missing_mask.not();
+        let present = joined.filter(&present_mask)?;
+        if present.height() == 0 {
+            break;
+        }
+        let next = present
+            .lazy()
+            .filter(col("child_count").gt(lit(0)))
+            .explode(["children"])
+            .select([
+                col("children").alias("child"),
+                (col("share") / col("child_count").cast(DataType::Float64)).alias("share"),
+            ])
+            .collect()?;
+        current = next;
+    }
+
+    if terminals.is_empty() {
+        return Ok(DataFrame::new(vec![
+            Series::new("material_key", Vec::<String>::new()),
+            Series::new("transitive_utility", Vec::<f64>::new()),
+        ])?);
+    }
+
+    let mut combined = terminals[0].clone();
+    for df in terminals.iter().skip(1) {
+        combined.vstack_mut(df)?;
+    }
+    let mut grouped = combined
+        .lazy()
+        .group_by([col("child")])
+        .agg([col("share").sum().alias("transitive_utility")])
+        .collect()?;
+    grouped.rename("child", "material_key")?;
+    Ok(grouped)
 }

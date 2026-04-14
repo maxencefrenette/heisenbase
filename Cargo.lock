@@ -1152,6 +1152,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rayon",
+ "serde_json",
  "shakmaty",
  "shakmaty-syzygy",
  "winnow",
