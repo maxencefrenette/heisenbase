@@ -1,5 +1,3 @@
-use std::ops::Not;
-
 use anyhow::{Result, anyhow};
 use heisenbase::material_key::MaterialKey;
 use heisenbase::storage;
@@ -165,11 +163,14 @@ fn compute_transitive_utility_candidates(
     min_games: u64,
     max_pieces: u32,
 ) -> Result<Vec<MaterialKey>> {
-    let material_df = load_material_keys_df(conn)?;
-    let transitive_df = compute_transitive_utility_df(&material_df)?;
-    let pgn_df = load_pgn_index_df(conn)?;
-    let filtered = pgn_df
-        .lazy()
+    let material_lf = load_material_keys_df(conn)?.lazy();
+    let pgn_lf = load_pgn_index_df(conn)?.lazy();
+    let transitive_lf = compute_transitive_utility_lf(material_lf.clone(), pgn_lf.clone());
+
+    // Direct utility and transitive utility both represent shares of global PGN
+    // position mass. We divide by material_key_size only at ranking time so both
+    // scores are normalized in the same way when we compare candidate tables.
+    let sorted = pgn_lf
         .filter(
             col("num_games")
                 .cast(DataType::Int64)
@@ -180,21 +181,24 @@ fn compute_transitive_utility_candidates(
                 .cast(DataType::Int64)
                 .lt_eq(lit(max_pieces as i64)),
         )
+        .join(
+            transitive_lf,
+            [col("material_key")],
+            [col("material_key")],
+            JoinArgs::new(JoinType::Left),
+        )
+        .with_columns([
+            col("transitive_utility").fill_null(lit(0.0)),
+            (col("utility") / col("material_key_size").cast(DataType::Float64))
+                .alias("utility_rank"),
+            (col("transitive_utility") / col("material_key_size").cast(DataType::Float64))
+                .alias("transitive_utility_rank"),
+        ])
+        .sort(
+            ["transitive_utility_rank", "utility_rank", "material_key"],
+            SortMultipleOptions::new().with_order_descending_multi([true, true, false]),
+        )
         .collect()?;
-    let joined = filtered.join(
-        &transitive_df,
-        ["material_key"],
-        ["material_key"],
-        JoinArgs::new(JoinType::Left),
-    )?;
-    let joined = joined
-        .lazy()
-        .with_columns([col("transitive_utility").fill_null(lit(0.0))])
-        .collect()?;
-    let sorted = joined.sort(
-        ["transitive_utility", "material_key"],
-        SortMultipleOptions::new().with_order_descending_multi([true, false]),
-    )?;
     let keys = sorted.column("material_key")?.str()?;
     let mut candidates = Vec::with_capacity(keys.len());
     for key in keys.into_iter() {
@@ -208,7 +212,7 @@ fn compute_transitive_utility_candidates(
 
 fn load_material_keys_df(conn: &Connection) -> Result<DataFrame> {
     let mut stmt = conn.prepare(
-        "SELECT name, children_json, unknown, win_or_draw, draw_or_loss
+        "SELECT name, children_json, total, unknown, win_or_draw, draw_or_loss
          FROM material_keys",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -218,17 +222,20 @@ fn load_material_keys_df(conn: &Connection) -> Result<DataFrame> {
             row.get::<_, i64>(2)?,
             row.get::<_, i64>(3)?,
             row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
         ))
     })?;
 
     let mut names = Vec::new();
     let mut children = Vec::new();
+    let mut totals = Vec::new();
     let mut unresolved = Vec::new();
     for row in rows {
-        let (name, children_json, unknown, win_or_draw, draw_or_loss) = row?;
+        let (name, children_json, total, unknown, win_or_draw, draw_or_loss) = row?;
         let parsed: Vec<String> = serde_json::from_str(&children_json)
             .map_err(|err| anyhow!("invalid children JSON for {name}: {err}"))?;
         names.push(name);
+        totals.push(total as f64);
         unresolved.push((unknown + win_or_draw + draw_or_loss) as f64);
         children.push(parsed);
     }
@@ -244,6 +251,7 @@ fn load_material_keys_df(conn: &Connection) -> Result<DataFrame> {
     Ok(DataFrame::new(vec![
         Series::new("name", names),
         children_builder.finish().into_series(),
+        Series::new("total", totals),
         Series::new("unresolved", unresolved),
         Series::new("child_count", child_counts),
     ])?)
@@ -251,7 +259,7 @@ fn load_material_keys_df(conn: &Connection) -> Result<DataFrame> {
 
 fn load_pgn_index_df(conn: &Connection) -> Result<DataFrame> {
     let mut stmt = conn.prepare(
-        "SELECT material_key, num_games, num_pieces
+        "SELECT material_key, num_games, num_pieces, material_key_size, utility
          FROM pgn_index",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -259,97 +267,64 @@ fn load_pgn_index_df(conn: &Connection) -> Result<DataFrame> {
             row.get::<_, String>(0)?,
             row.get::<_, i64>(1)?,
             row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, f64>(4)?,
         ))
     })?;
 
     let mut material_keys = Vec::new();
     let mut num_games = Vec::new();
     let mut num_pieces = Vec::new();
+    let mut material_key_size = Vec::new();
+    let mut utility = Vec::new();
     for row in rows {
-        let (material_key, games, pieces) = row?;
+        let (material_key, games, pieces, size, score) = row?;
         material_keys.push(material_key);
         num_games.push(games);
         num_pieces.push(pieces);
+        material_key_size.push(size);
+        utility.push(score);
     }
 
     Ok(DataFrame::new(vec![
         Series::new("material_key", material_keys),
         Series::new("num_games", num_games),
         Series::new("num_pieces", num_pieces),
+        Series::new("material_key_size", material_key_size),
+        Series::new("utility", utility),
     ])?)
 }
 
-fn compute_transitive_utility_df(material_df: &DataFrame) -> Result<DataFrame> {
-    let edges = material_df
+fn compute_transitive_utility_lf(material_lf: LazyFrame, pgn_lf: LazyFrame) -> LazyFrame {
+    // Transitive utility propagates only one step into unsolved territory.
+    // Each solved parent contributes:
+    //
+    //     parent.utility * (parent.unresolved / parent.total) / parent.child_count
+    //
+    // This keeps propagated mass in the same units as direct utility:
+    // both are shares of global PGN position mass before any size normalization.
+    material_lf
         .clone()
-        .lazy()
         .filter(col("child_count").gt(lit(0)))
+        .join(
+            pgn_lf.select([col("material_key"), col("utility")]),
+            [col("name")],
+            [col("material_key")],
+            JoinArgs::new(JoinType::Left),
+        )
+        .with_columns([col("utility").fill_null(lit(0.0))])
         .explode([col("children")])
-        .select([
-            col("children").alias("child"),
-            (col("unresolved") / col("child_count").cast(DataType::Float64)).alias("share"),
-        ])
-        .collect()?;
-
-    let mut current = edges;
-    let mut terminals: Vec<DataFrame> = Vec::new();
-    let material_lf = material_df.clone().lazy();
-
-    loop {
-        if current.height() == 0 {
-            break;
-        }
-
-        let joined = current
-            .lazy()
-            .join(
-                material_lf.clone(),
-                [col("child")],
-                [col("name")],
-                JoinArgs::new(JoinType::Left),
-            )
-            .collect()?;
-
-        let children_col = joined.column("children")?;
-        let missing_mask = children_col.is_null();
-        let missing = joined.filter(&missing_mask)?;
-        if missing.height() > 0 {
-            terminals.push(missing.select(["child", "share"])?);
-        }
-
-        let present_mask = missing_mask.not();
-        let present = joined.filter(&present_mask)?;
-        if present.height() == 0 {
-            break;
-        }
-
-        current = present
-            .lazy()
-            .filter(col("child_count").gt(lit(0)))
-            .explode([col("children")])
-            .select([
-                col("children").alias("child"),
-                (col("share") / col("child_count").cast(DataType::Float64)).alias("share"),
-            ])
-            .collect()?;
-    }
-
-    if terminals.is_empty() {
-        return Ok(DataFrame::new(vec![
-            Series::new("material_key", Vec::<String>::new()),
-            Series::new("transitive_utility", Vec::<f64>::new()),
-        ])?);
-    }
-
-    let mut combined = terminals[0].clone();
-    for df in terminals.iter().skip(1) {
-        combined.vstack_mut(df)?;
-    }
-    let mut grouped = combined
-        .lazy()
-        .group_by([col("child")])
-        .agg([col("share").sum().alias("transitive_utility")])
-        .collect()?;
-    grouped.rename("child", "material_key")?;
-    Ok(grouped)
+        .join(
+            material_lf.clone(),
+            [col("children")],
+            [col("name")],
+            JoinArgs::new(JoinType::Left),
+        )
+        .filter(col("children_right").is_null())
+        .group_by([col("children")])
+        .agg([(col("utility") * (col("unresolved") / col("total"))
+            / col("child_count").cast(DataType::Float64))
+        .sum()
+        .alias("transitive_utility")])
+        .rename(["children"], ["material_key"])
 }

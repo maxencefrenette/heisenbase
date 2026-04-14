@@ -116,10 +116,11 @@ pub fn run_stage2() -> Result<()> {
         let num_pieces = material.total_piece_count() as i64;
         let num_pawns = material.pawns.pawn_count() as i64;
         let num_non_pawns = material.non_pawn_piece_count() as i64;
+        // Utility is the share of all indexed PGN positions occupied by this material key.
+        // We do not divide by material_key_size here. That normalization is applied later
+        // when ranking candidates so direct and transitive utility live in the same units.
         let utility = if total_positions > 0 {
-            1_000_000_000f64 * num_positions as f64
-                / total_positions as f64
-                / material_key_size as f64
+            num_positions as f64 / total_positions as f64
         } else {
             0.0
         };
