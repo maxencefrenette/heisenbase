@@ -3,6 +3,7 @@ mod index;
 mod index_pgn;
 mod stats;
 
+use clap::Args;
 use clap::{Parser, Subcommand};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use shakmaty::{Chess, EnPassantMode, fen::Fen};
@@ -38,10 +39,13 @@ enum Commands {
         #[arg(long, required = true)]
         max_pieces: u32,
     },
-    /// Index fishtest PGN files into the sqlite raw PGN index.
-    PgnIndexStage1,
-    /// Build the filtered sqlite PGN index with derived columns.
-    PgnIndexStage2,
+    /// Build the PGN index from fishtest PGN files.
+    #[command(
+        name = "pgn-index",
+        about = "Build the PGN index used for ranking material keys",
+        long_about = "Build the PGN index used for ranking material keys. By default this runs both phases: first parse fishtest PGNs into pgn_index_raw, then derive the filtered pgn_index table."
+    )]
+    PgnIndex(PgnIndexArgs),
     /// Sample positions from heisenbase tables and compare against Syzygy WDL tables.
     CheckAgainstSyzygy,
     /// Initialize the sqlite database.
@@ -49,6 +53,16 @@ enum Commands {
     IndexInit,
     /// Show stats about the current SQLite database.
     Stats(stats::StatsArgs),
+}
+
+#[derive(Args)]
+struct PgnIndexArgs {
+    /// Skip PGN parsing and rebuild only the derived pgn_index table from pgn_index_raw.
+    #[arg(long, conflicts_with = "stage1_only")]
+    from_raw: bool,
+    /// Run only the raw PGN parsing phase and stop after writing pgn_index_raw.
+    #[arg(long, conflicts_with = "from_raw")]
+    stage1_only: bool,
 }
 
 /// Parse CLI arguments and execute the requested command.
@@ -68,11 +82,15 @@ pub fn run() -> Result<()> {
         } => {
             generate::run_generate_many(min_games, max_pieces)?;
         }
-        Commands::PgnIndexStage1 => {
-            index_pgn::run_stage1()?;
-        }
-        Commands::PgnIndexStage2 => {
-            index_pgn::run_stage2()?;
+        Commands::PgnIndex(args) => {
+            if args.stage1_only {
+                index_pgn::run_stage1()?;
+            } else if args.from_raw {
+                index_pgn::run_stage2()?;
+            } else {
+                index_pgn::run_stage1()?;
+                index_pgn::run_stage2()?;
+            }
         }
         Commands::CheckAgainstSyzygy => {
             run_check_against_syzygy()?;
@@ -102,8 +120,7 @@ impl Commands {
             self,
             Self::Generate { .. }
                 | Self::GenerateMany { .. }
-                | Self::PgnIndexStage1
-                | Self::PgnIndexStage2
+                | Self::PgnIndex(_)
                 | Self::CheckAgainstSyzygy
         )
     }
@@ -291,7 +308,7 @@ fn run_check_against_syzygy() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::Commands;
+    use super::{Commands, PgnIndexArgs};
 
     #[test]
     fn classifies_long_running_commands() {
@@ -308,8 +325,13 @@ mod tests {
             }
             .is_long_running()
         );
-        assert!(Commands::PgnIndexStage1.is_long_running());
-        assert!(Commands::PgnIndexStage2.is_long_running());
+        assert!(
+            Commands::PgnIndex(PgnIndexArgs {
+                from_raw: false,
+                stage1_only: false,
+            })
+            .is_long_running()
+        );
         assert!(Commands::CheckAgainstSyzygy.is_long_running());
         assert!(!Commands::IndexInit.is_long_running());
     }
