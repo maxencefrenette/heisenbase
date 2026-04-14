@@ -1,5 +1,9 @@
 # AGENTS Instructions
 
+- Run `cargo fmt` to ensure code is formatted.
+- Run `cargo clippy --all-targets --all-features -- -D warnings` and ensure it passes.
+- Run `cargo test` and ensure all tests pass.
+
 ## Generating tablebase files
 
 As a test, the KQvK table can be generated with the following command:

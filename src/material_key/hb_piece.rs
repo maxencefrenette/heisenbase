@@ -62,10 +62,7 @@ impl HbPieceRole {
     }
 
     pub fn is_bishop(self) -> bool {
-        match self {
-            HbPieceRole::DarkBishop | HbPieceRole::LightBishop => true,
-            _ => false,
-        }
+        matches!(self, HbPieceRole::DarkBishop | HbPieceRole::LightBishop)
     }
 }
 

@@ -505,7 +505,7 @@ mod tests {
         )
         .unwrap();
 
-        let target = choose_next_generation_target(&conn, 1, 5)
+        let target = choose_next_generation_target(conn, 1, 5)
             .unwrap()
             .expect("expected a generation target");
         assert_eq!(target.material_key.to_string(), "KQvKR");

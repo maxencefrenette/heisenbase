@@ -145,7 +145,7 @@ impl MaterialKey {
             self.pawns
                 .child_pawn_structures_no_piece_change()
                 .into_iter()
-                .map(|ps| MaterialKey::new(self.counts.clone(), ps)),
+                .map(|ps| MaterialKey::new(self.counts, ps)),
         );
 
         // Captures: any move that removes an opponent piece (except the king).
@@ -163,7 +163,7 @@ impl MaterialKey {
                         return None;
                     }
 
-                    let mut counts = self.counts.clone();
+                    let mut counts = self.counts;
                     counts[opponent][role] -= 1;
                     Some(MaterialKey::new(counts, ps))
                 }),
@@ -180,7 +180,7 @@ impl MaterialKey {
                         return None;
                     }
 
-                    let mut counts = self.counts.clone();
+                    let mut counts = self.counts;
                     counts[color][role] += 1;
                     Some(MaterialKey::new(counts, ps))
                 }),
@@ -202,7 +202,7 @@ impl MaterialKey {
                         return None;
                     }
 
-                    let mut counts = self.counts.clone();
+                    let mut counts = self.counts;
                     counts[color][role1] += 1;
                     counts[opponent][role2] -= 1;
                     Some(MaterialKey::new(counts, ps))

@@ -1,14 +1,15 @@
 repos:
-  - repo: https://github.com/FeryET/pre-commit-rust
-    rev: v1.2.1
+  - repo: local
     hooks:
-      - id: fmt
-      - id: cargo-check
-  # - repo: local
-  #   hooks:
-  #     - id: clippy-fix
-  #       name: cargo clippy --fix
-  #       entry: cargo clippy --fix --allow-dirty --allow-staged
-  #       language: system
-  #       pass_filenames: false
-  #       types: [rust]
+      - id: cargo-fmt-check
+        name: cargo fmt --check
+        entry: cargo fmt --check
+        language: system
+        pass_filenames: false
+        types: [rust]
+      - id: cargo-clippy
+        name: cargo clippy --all-targets --all-features -- -D warnings
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+        types: [rust]
