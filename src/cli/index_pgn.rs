@@ -25,6 +25,7 @@ const ILLEGAL_MOVE_PREFIX: &str = "illegal move:";
 const INVALID_FEN_TAG_PREFIX: &str = "invalid FEN tag:";
 const INVALID_FEN_POSITION_PREFIX: &str = "invalid FEN position:";
 const CORRUPT_GZIP_PREFIX: &str = "corrupt gzip stream";
+const RAW_INDEX_LOG_EVERY: usize = 250_000;
 
 pub fn run_stage1() -> Result<()> {
     let mut files = Vec::new();
@@ -64,6 +65,10 @@ pub fn run_stage1() -> Result<()> {
     let mut entries: Vec<_> = counts_games.into_iter().collect();
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
+    println!(
+        "Collected {} unique material keys. Writing raw index to SQLite...",
+        entries.len()
+    );
     write_raw_index(&entries, &counts_positions, total_games, total_positions)?;
     Ok(())
 }
@@ -189,6 +194,7 @@ fn write_raw_index(
     total_games: u64,
     total_positions: u64,
 ) -> Result<()> {
+    println!("Preparing raw index transaction...");
     let mut conn = storage::open_database()?;
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM pgn_index_raw", [])?;
@@ -202,7 +208,8 @@ fn write_raw_index(
         ) VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
 
-    for (key, count_games) in entries {
+    println!("Inserting {} raw-index rows...", entries.len());
+    for (idx, (key, count_games)) in entries.iter().enumerate() {
         insert.execute(params![
             key.to_string(),
             *count_games as i64,
@@ -210,10 +217,17 @@ fn write_raw_index(
             total_games as i64,
             total_positions as i64,
         ])?;
+
+        let inserted = idx + 1;
+        if inserted % RAW_INDEX_LOG_EVERY == 0 || inserted == entries.len() {
+            println!("Inserted {inserted}/{} raw-index rows...", entries.len());
+        }
     }
 
     drop(insert);
+    println!("Committing raw index transaction...");
     tx.commit()?;
+    println!("Raw index write complete.");
     Ok(())
 }
 

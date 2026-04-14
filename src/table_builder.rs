@@ -267,7 +267,8 @@ mod tests {
     #[test]
     fn terminal_positions_scored_in_first_step() {
         let material = MaterialKey::from_string("KQvK").unwrap();
-        let mut tb = TableBuilder::new(material);
+        let db_path = temp_db_path("terminal_positions");
+        let mut tb = TableBuilder::new_with_db_path(material, &db_path);
 
         // Mark all positions as draws so the step only evaluates the targets.
         tb.positions.fill(DtzScoreRange::draw());
@@ -296,12 +297,14 @@ mod tests {
 
         assert_eq!(tb.positions[checkmate_idx], DtzScoreRange::checkmate());
         assert_eq!(tb.positions[stalemate_idx], DtzScoreRange::draw());
+        let _ = fs::remove_file(db_path);
     }
 
     #[test]
     fn mate_in_one_scored_after_two_steps() {
         let material = MaterialKey::from_string("KQvK").unwrap();
-        let mut tb = TableBuilder::new(material);
+        let db_path = temp_db_path("mate_in_one");
+        let mut tb = TableBuilder::new_with_db_path(material, &db_path);
 
         // Pre-fill positions with draws so only relevant indices are processed.
         tb.positions.fill(DtzScoreRange::draw());
@@ -332,6 +335,7 @@ mod tests {
 
         let wdl: WdlScoreRange = tb.positions[idx].into();
         assert_eq!(wdl, WdlScoreRange::Win);
+        let _ = fs::remove_file(db_path);
     }
 
     fn temp_db_path(prefix: &str) -> PathBuf {
