@@ -1,6 +1,7 @@
 mod generate;
 mod index;
 mod index_pgn;
+mod stats;
 
 use clap::{Parser, Subcommand};
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -46,6 +47,8 @@ enum Commands {
     /// Initialize the sqlite database.
     #[command(name = "index-init")]
     IndexInit,
+    /// Show stats about the current SQLite database.
+    Stats(stats::StatsArgs),
 }
 
 /// Parse CLI arguments and execute the requested command.
@@ -76,6 +79,9 @@ pub fn run() -> Result<()> {
         }
         Commands::IndexInit => {
             index::run_index_init()?;
+        }
+        Commands::Stats(args) => {
+            stats::run(args)?;
         }
     }
 
