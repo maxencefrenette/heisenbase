@@ -1,11 +1,11 @@
 use anyhow::{Result, anyhow};
 use heisenbase::material_key::MaterialKey;
-use heisenbase::storage;
+use heisenbase::storage::{self, Database, MaterialStatsRow};
 use heisenbase::table_builder::TableBuilder;
 use heisenbase::wdl_score_range::WdlScoreRange;
 use heisenbase::wdl_table::WdlTable;
 use polars::prelude::*;
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn run_generate(material: MaterialKey) -> Result<()> {
@@ -62,9 +62,9 @@ pub(crate) fn run_generate(material: MaterialKey) -> Result<()> {
         println!("{variant:?}: {percentage:.2}%");
     }
 
-    let conn = storage::open_database()?;
-    storage::store_wdl_table(&conn, &wdl_table)?;
-    log_stats_to_index(&conn, &wdl_table, &counts)?;
+    let db = Database::open_default()?;
+    db.put_wdl_table(&wdl_table)?;
+    log_stats_to_index(&db, &wdl_table, &counts)?;
     println!(
         "Stored table in {} for {}",
         storage::DB_PATH,
@@ -74,7 +74,7 @@ pub(crate) fn run_generate(material: MaterialKey) -> Result<()> {
     Ok(())
 }
 
-fn log_stats_to_index(conn: &Connection, wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
+fn log_stats_to_index(db: &Database, wdl_table: &WdlTable, counts: &[usize; 7]) -> Result<()> {
     let updated_at = current_timestamp()?;
     let mut children: Vec<String> = wdl_table
         .material
@@ -83,65 +83,32 @@ fn log_stats_to_index(conn: &Connection, wdl_table: &WdlTable, counts: &[usize; 
         .map(|key| key.to_string())
         .collect();
     children.sort();
-    let children_json = serde_json::to_string(&children)?;
-
-    conn.execute(
-        "INSERT INTO material_keys (
-            name,
-            children_json,
-            num_pieces,
-            num_pawns,
-            num_non_pawns,
-            total,
-            illegal,
-            win,
-            draw,
-            loss,
-            win_or_draw,
-            draw_or_loss,
-            unknown,
-            updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
-        ON CONFLICT(name) DO UPDATE SET
-            children_json = excluded.children_json,
-            num_pieces = excluded.num_pieces,
-            num_pawns = excluded.num_pawns,
-            num_non_pawns = excluded.num_non_pawns,
-            total = excluded.total,
-            illegal = excluded.illegal,
-            win = excluded.win,
-            draw = excluded.draw,
-            loss = excluded.loss,
-            win_or_draw = excluded.win_or_draw,
-            draw_or_loss = excluded.draw_or_loss,
-            unknown = excluded.unknown,
-            updated_at = excluded.updated_at",
-        params![
-            wdl_table.material.to_string(),
-            children_json,
-            wdl_table.material.total_piece_count() as i64,
-            wdl_table.material.pawns.pawn_count() as i64,
-            wdl_table.material.non_pawn_piece_count() as i64,
-            wdl_table.positions.len() as i64,
-            counts[WdlScoreRange::IllegalPosition as usize] as i64,
-            counts[WdlScoreRange::Win as usize] as i64,
-            counts[WdlScoreRange::Draw as usize] as i64,
-            counts[WdlScoreRange::Loss as usize] as i64,
-            counts[WdlScoreRange::WinOrDraw as usize] as i64,
-            counts[WdlScoreRange::DrawOrLoss as usize] as i64,
-            counts[WdlScoreRange::Unknown as usize] as i64,
-            updated_at,
-        ],
-    )?;
+    let row = MaterialStatsRow {
+        name: wdl_table.material.to_string(),
+        children,
+        num_pieces: wdl_table.material.total_piece_count() as i64,
+        num_pawns: wdl_table.material.pawns.pawn_count() as i64,
+        num_non_pawns: wdl_table.material.non_pawn_piece_count() as i64,
+        total: wdl_table.positions.len() as i64,
+        illegal: counts[WdlScoreRange::IllegalPosition as usize] as i64,
+        win: counts[WdlScoreRange::Win as usize] as i64,
+        draw: counts[WdlScoreRange::Draw as usize] as i64,
+        loss: counts[WdlScoreRange::Loss as usize] as i64,
+        win_or_draw: counts[WdlScoreRange::WinOrDraw as usize] as i64,
+        draw_or_loss: counts[WdlScoreRange::DrawOrLoss as usize] as i64,
+        unknown: counts[WdlScoreRange::Unknown as usize] as i64,
+        updated_at,
+    };
+    db.upsert_material_stats(&row)?;
 
     Ok(())
 }
 
 pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<()> {
-    let conn = storage::open_database()?;
+    let db = Database::open_default()?;
 
     loop {
-        let Some(target) = choose_next_generation_target(&conn, min_games, max_pieces)? else {
+        let Some(target) = choose_next_generation_target(db.conn(), min_games, max_pieces)? else {
             println!(
                 "No material keys matched filters (min-games: {}, max-pieces: {}).",
                 min_games, max_pieces
@@ -423,7 +390,7 @@ fn compute_stale_material_keys_lf(material_lf: LazyFrame) -> LazyFrame {
 #[cfg(test)]
 mod tests {
     use super::choose_next_generation_target;
-    use heisenbase::storage;
+    use heisenbase::storage::Database;
     use rusqlite::{Connection, params};
     use std::fs;
     use std::path::PathBuf;
@@ -432,10 +399,11 @@ mod tests {
     #[test]
     fn prefers_stale_tables_over_unsolved_candidates() {
         let db_path = temp_db_path("stale-priority");
-        let conn = storage::open_database_at_path(&db_path).unwrap();
-        seed_wdl_table(&conn, "KQvKR");
-        seed_wdl_table(&conn, "KQvK");
-        seed_wdl_table(&conn, "KRvK");
+        let db = Database::open_at(&db_path).unwrap();
+        let conn = db.conn();
+        seed_wdl_table(conn, "KQvKR");
+        seed_wdl_table(conn, "KQvK");
+        seed_wdl_table(conn, "KRvK");
 
         conn.execute(
             "INSERT INTO material_keys (

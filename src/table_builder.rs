@@ -1,7 +1,7 @@
 use crate::material_key::MaterialKey;
 use crate::position_indexer::{PositionIndexer, PositionMappingError};
 use crate::score::DtzScoreRange;
-use crate::storage;
+use crate::storage::Database;
 use crate::wdl_score_range::WdlScoreRange;
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -21,7 +21,7 @@ pub struct TableBuilder {
 
 impl TableBuilder {
     pub fn new(material: MaterialKey) -> Self {
-        Self::with_db_path(material, Path::new(storage::DB_PATH))
+        Self::with_db_path(material, Path::new(crate::storage::DB_PATH))
     }
 
     #[cfg(test)]
@@ -36,7 +36,7 @@ impl TableBuilder {
         let mut child_indexers = HashMap::new();
         let mut loaded_child_tables = Vec::new();
         let mut missing_child_tables = Vec::new();
-        let conn = storage::open_database_at_path(db_path).unwrap_or_else(|err| {
+        let db = Database::open_at(db_path).unwrap_or_else(|err| {
             panic!(
                 "failed to open sqlite database {}: {err}",
                 db_path.display()
@@ -44,7 +44,8 @@ impl TableBuilder {
         });
 
         for child_key in material.child_material_keys() {
-            let table = storage::load_wdl_table(&conn, &child_key)
+            let table = db
+                .get_wdl_table(&child_key)
                 .unwrap_or_else(|err| panic!("failed to load child table {child_key}: {err}"));
             match table {
                 Some(table) => {
@@ -223,7 +224,7 @@ impl TableBuilder {
 mod tests {
     use super::*;
     use crate::position_indexer::PositionIndexer;
-    use crate::storage;
+    use crate::storage::Database;
     use crate::wdl_score_range::WdlScoreRange;
     use crate::wdl_table::WdlTable;
     use shakmaty::{CastlingMode, Role, Square, fen::Fen};
@@ -349,8 +350,8 @@ mod tests {
     }
 
     fn store_table(db_path: &Path, table: &WdlTable) {
-        let conn = storage::open_database_at_path(db_path).unwrap();
-        storage::store_wdl_table(&conn, table).unwrap();
+        let db = Database::open_at(db_path).unwrap();
+        db.put_wdl_table(table).unwrap();
     }
 
     #[test]

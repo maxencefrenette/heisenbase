@@ -1,8 +1,8 @@
 use anyhow::Result;
 
-use heisenbase::storage;
+use heisenbase::storage::Database;
 
 pub fn run_index_init() -> Result<()> {
-    let _ = storage::open_database()?;
+    let _ = Database::open_default()?;
     Ok(())
 }

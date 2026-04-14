@@ -12,7 +12,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow, bail};
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
-use heisenbase::storage;
+use heisenbase::storage::Database;
 use heisenbase::wdl_score_range::WdlScoreRange;
 
 #[derive(Parser)]
@@ -140,8 +140,8 @@ fn heisenbase_allows(wdl: WdlScoreRange, syzygy: SimpleWdl) -> bool {
 }
 
 fn material_keys_from_db() -> Result<Vec<MaterialKey>> {
-    let conn = storage::open_database()?;
-    storage::list_wdl_table_keys(&conn)
+    let db = Database::open_default()?;
+    db.list_wdl_table_keys()
 }
 
 fn collect_valid_indices(indexer: &PositionIndexer) -> Vec<usize> {
@@ -157,7 +157,7 @@ fn collect_valid_indices(indexer: &PositionIndexer) -> Vec<usize> {
 
 fn run_check_against_syzygy() -> Result<()> {
     let syzygy_dir = Path::new("./data/syzygy");
-    let conn = storage::open_database()?;
+    let db = Database::open_default()?;
 
     let mut tablebase = Tablebase::<Chess>::new();
     let added = tablebase.add_directory(syzygy_dir)?;
@@ -192,7 +192,7 @@ fn run_check_against_syzygy() -> Result<()> {
         );
         for material in keys {
             total_tables += 1;
-            let Some(table) = storage::load_wdl_table(&conn, &material)? else {
+            let Some(table) = db.get_wdl_table(&material)? else {
                 eprintln!("Missing heisenbase table for {}", material);
                 continue;
             };

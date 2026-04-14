@@ -14,9 +14,8 @@ use anyhow::{Result, anyhow};
 use flate2::read::MultiGzDecoder;
 use heisenbase::material_key::MaterialKey;
 use heisenbase::position_indexer::PositionIndexer;
-use heisenbase::storage;
+use heisenbase::storage::{Database, PgnIndexRawRow, PgnIndexRow};
 use pgn_reader::{RawTag, Reader, SanPlus, Skip, Visitor};
-use rusqlite::params;
 use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
 
 const PGN_ROOT: &str = "./data/fishtest_pgns";
@@ -74,9 +73,9 @@ pub fn run_stage1() -> Result<()> {
 }
 
 pub fn run_stage2() -> Result<()> {
-    let mut conn = storage::open_database()?;
+    let mut db = Database::open_default()?;
     let entries = {
-        let mut stmt = conn.prepare(
+        let mut stmt = db.conn().prepare(
             "SELECT material_key, num_games, num_positions, total_games, total_positions
              FROM pgn_index_raw
              WHERE num_games > 1",
@@ -98,23 +97,7 @@ pub fn run_stage2() -> Result<()> {
         entries
     };
 
-    let tx = conn.transaction()?;
-    tx.execute("DELETE FROM pgn_index", [])?;
-    let mut insert = tx.prepare(
-        "INSERT INTO pgn_index (
-            material_key,
-            num_games,
-            num_positions,
-            total_games,
-            total_positions,
-            material_key_size,
-            num_pieces,
-            num_pawns,
-            num_non_pawns,
-            utility
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-    )?;
-
+    let mut rows = Vec::with_capacity(entries.len());
     for (material_key, num_games, num_positions, total_games, total_positions) in entries {
         let material = parse_material_key(&material_key)?;
         let material_key_size = PositionIndexer::new(material.clone()).total_positions() as i64;
@@ -129,7 +112,7 @@ pub fn run_stage2() -> Result<()> {
         } else {
             0.0
         };
-        insert.execute(params![
+        rows.push(PgnIndexRow {
             material_key,
             num_games,
             num_positions,
@@ -140,10 +123,9 @@ pub fn run_stage2() -> Result<()> {
             num_pawns,
             num_non_pawns,
             utility,
-        ])?;
+        });
     }
-    drop(insert);
-    tx.commit()?;
+    db.replace_pgn_index(&rows)?;
 
     Ok(())
 }
@@ -195,28 +177,18 @@ fn write_raw_index(
     total_positions: u64,
 ) -> Result<()> {
     println!("Preparing raw index transaction...");
-    let mut conn = storage::open_database()?;
-    let tx = conn.transaction()?;
-    tx.execute("DELETE FROM pgn_index_raw", [])?;
-    let mut insert = tx.prepare(
-        "INSERT INTO pgn_index_raw (
-            material_key,
-            num_games,
-            num_positions,
-            total_games,
-            total_positions
-        ) VALUES (?1, ?2, ?3, ?4, ?5)",
-    )?;
+    let mut db = Database::open_default()?;
+    let mut rows = Vec::with_capacity(entries.len());
 
     println!("Inserting {} raw-index rows...", entries.len());
     for (idx, (key, count_games)) in entries.iter().enumerate() {
-        insert.execute(params![
-            key.to_string(),
-            *count_games as i64,
-            *counts_positions.get(key).unwrap_or(&0) as i64,
-            total_games as i64,
-            total_positions as i64,
-        ])?;
+        rows.push(PgnIndexRawRow {
+            material_key: key.to_string(),
+            num_games: *count_games as i64,
+            num_positions: *counts_positions.get(key).unwrap_or(&0) as i64,
+            total_games: total_games as i64,
+            total_positions: total_positions as i64,
+        });
 
         let inserted = idx + 1;
         if inserted % RAW_INDEX_LOG_EVERY == 0 || inserted == entries.len() {
@@ -224,9 +196,8 @@ fn write_raw_index(
         }
     }
 
-    drop(insert);
     println!("Committing raw index transaction...");
-    tx.commit()?;
+    db.replace_pgn_index_raw(&rows)?;
     println!("Raw index write complete.");
     Ok(())
 }

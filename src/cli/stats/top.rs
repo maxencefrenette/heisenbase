@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Args, ValueEnum};
-use heisenbase::storage;
+use heisenbase::storage::Database;
 use rusqlite::params;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -36,7 +36,8 @@ pub(crate) struct TopArgs {
 }
 
 pub(crate) fn run(args: TopArgs) -> Result<()> {
-    let conn = storage::open_database()?;
+    let db = Database::open_default()?;
+    let conn = db.conn();
     let order_by = match args.by {
         TopMetric::UtilityRank => "utility_rank DESC, utility DESC, material_key ASC",
         TopMetric::Utility => "utility DESC, utility_rank DESC, material_key ASC",

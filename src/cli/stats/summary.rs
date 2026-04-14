@@ -2,7 +2,7 @@ use std::fs;
 
 use anyhow::Result;
 use clap::Args;
-use heisenbase::storage;
+use heisenbase::storage::{self, Database};
 
 #[derive(Args)]
 #[command(
@@ -12,7 +12,8 @@ use heisenbase::storage;
 pub(crate) struct SummaryArgs {}
 
 pub(crate) fn run(_: SummaryArgs) -> Result<()> {
-    let conn = storage::open_database()?;
+    let db = Database::open_default()?;
+    let conn = db.conn();
     let db_size_bytes = fs::metadata(storage::DB_PATH)
         .map(|metadata| metadata.len())
         .unwrap_or(0);
