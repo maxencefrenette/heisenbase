@@ -1,3 +1,4 @@
+mod coverage;
 mod frontier;
 mod material;
 mod summary;
@@ -8,6 +9,8 @@ use clap::{Args, Subcommand};
 
 #[derive(Subcommand)]
 pub(crate) enum StatsCommands {
+    /// Show exact-label coverage overall and by piece count.
+    Coverage(coverage::CoverageArgs),
     /// Show the material keys that generate-many would process next.
     Frontier(frontier::FrontierArgs),
     /// Show a one-screen summary of the current database.
@@ -30,6 +33,7 @@ pub(crate) struct StatsArgs {
 
 pub(crate) fn run(args: StatsArgs) -> Result<()> {
     match args.command {
+        StatsCommands::Coverage(args) => coverage::run(args),
         StatsCommands::Frontier(args) => frontier::run(args),
         StatsCommands::Summary(args) => summary::run(args),
         StatsCommands::Top(args) => top::run(args),
