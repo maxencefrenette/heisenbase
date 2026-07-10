@@ -1,6 +1,8 @@
 mod coverage;
 mod frontier;
 mod material;
+mod piece_histogram;
+mod size_curve;
 mod summary;
 mod top;
 mod utility;
@@ -22,6 +24,10 @@ pub(crate) enum StatsCommands {
     Utility(utility::UtilityArgs),
     /// Show detailed stats for a single material key.
     Material(material::MaterialArgs),
+    /// Show the piece-count distribution under a tablebase size budget.
+    PieceHistogram(piece_histogram::PieceHistogramArgs),
+    /// Show PGN coverage as a utility-ranked tablebase grows.
+    SizeCurve(size_curve::SizeCurveArgs),
 }
 
 #[derive(Args)]
@@ -42,5 +48,7 @@ pub(crate) fn run(args: StatsArgs) -> Result<()> {
         StatsCommands::Top(args) => top::run(args),
         StatsCommands::Utility(args) => utility::run(args),
         StatsCommands::Material(args) => material::run(args),
+        StatsCommands::PieceHistogram(args) => piece_histogram::run(args),
+        StatsCommands::SizeCurve(args) => size_curve::run(args),
     }
 }
