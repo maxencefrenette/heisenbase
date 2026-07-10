@@ -1,3 +1,4 @@
+pub mod generation_targets;
 pub mod material_key;
 pub mod position_indexer;
 pub mod score;

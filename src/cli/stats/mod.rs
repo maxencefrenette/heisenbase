@@ -1,3 +1,4 @@
+mod frontier;
 mod material;
 mod summary;
 mod top;
@@ -7,6 +8,8 @@ use clap::{Args, Subcommand};
 
 #[derive(Subcommand)]
 pub(crate) enum StatsCommands {
+    /// Show the material keys that generate-many would process next.
+    Frontier(frontier::FrontierArgs),
     /// Show a one-screen summary of the current database.
     Summary(summary::SummaryArgs),
     /// Show the top indexed material keys from the PGN index.
@@ -27,6 +30,7 @@ pub(crate) struct StatsArgs {
 
 pub(crate) fn run(args: StatsArgs) -> Result<()> {
     match args.command {
+        StatsCommands::Frontier(args) => frontier::run(args),
         StatsCommands::Summary(args) => summary::run(args),
         StatsCommands::Top(args) => top::run(args),
         StatsCommands::Material(args) => material::run(args),
