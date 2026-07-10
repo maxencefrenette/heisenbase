@@ -3,6 +3,7 @@ use polars::prelude::*;
 use rusqlite::Connection;
 
 use crate::material_key::MaterialKey;
+use crate::position_indexer::PositionIndexer;
 use crate::storage::Database;
 
 #[derive(Debug)]
@@ -15,6 +16,31 @@ pub struct GenerationTarget {
     pub utility_rank: f64,
     pub transitive_utility: f64,
     pub transitive_utility_rank: f64,
+}
+
+#[derive(Debug)]
+pub struct UtilityStats {
+    pub material_key: MaterialKey,
+    pub has_table: bool,
+    pub has_pgn_index: bool,
+    pub num_games: i64,
+    pub material_key_size: i64,
+    pub utility: f64,
+    pub utility_rank: f64,
+    pub transitive_utility: f64,
+    pub transitive_utility_rank: f64,
+    pub contributions: Vec<TransitiveUtilityContribution>,
+}
+
+#[derive(Debug)]
+pub struct TransitiveUtilityContribution {
+    pub parent: String,
+    pub parent_utility: f64,
+    pub parent_total: i64,
+    pub parent_unresolved: i64,
+    pub unresolved_fraction: f64,
+    pub child_count: i64,
+    pub contribution: f64,
 }
 
 pub fn compute_generation_targets(
@@ -139,6 +165,82 @@ pub fn compute_generation_targets(
     Ok(candidates)
 }
 
+pub fn compute_utility_stats(db: &Database, material: &MaterialKey) -> Result<UtilityStats> {
+    let pgn_row = db.get_pgn_index_row(material)?;
+    let has_pgn_index = pgn_row.is_some();
+    let material_key_size = pgn_row
+        .as_ref()
+        .map(|row| row.material_key_size)
+        .unwrap_or_else(|| PositionIndexer::new(material.clone()).total_positions() as i64);
+    let num_games = pgn_row.as_ref().map_or(0, |row| row.num_games);
+    let utility = pgn_row.as_ref().map_or(0.0, |row| row.utility);
+
+    let material_lf = load_material_keys_df(db.conn())?.lazy();
+    let pgn_lf = load_pgn_index_df(db.conn())?.lazy();
+    let contributions_df = compute_transitive_utility_contributions_lf(material_lf, pgn_lf)
+        .filter(col("material_key").eq(lit(material.to_string())))
+        .filter(col("contribution").gt(lit(0.0)))
+        .sort(
+            ["contribution", "parent"],
+            SortMultipleOptions::new().with_order_descending_multi([true, false]),
+        )
+        .collect()?;
+
+    let parents = contributions_df.column("parent")?.str()?;
+    let parent_utility = contributions_df.column("parent_utility")?.f64()?;
+    let parent_total = contributions_df.column("parent_total")?.f64()?;
+    let parent_unresolved = contributions_df.column("parent_unresolved")?.f64()?;
+    let unresolved_fraction = contributions_df.column("unresolved_fraction")?.f64()?;
+    let child_count = contributions_df.column("child_count")?.i64()?;
+    let contribution = contributions_df.column("contribution")?.f64()?;
+    let mut contributions = Vec::with_capacity(contributions_df.height());
+    for index in 0..contributions_df.height() {
+        contributions.push(TransitiveUtilityContribution {
+            parent: parents
+                .get(index)
+                .ok_or_else(|| anyhow!("parent is null"))?
+                .to_string(),
+            parent_utility: parent_utility
+                .get(index)
+                .ok_or_else(|| anyhow!("parent_utility is null"))?,
+            parent_total: parent_total
+                .get(index)
+                .ok_or_else(|| anyhow!("parent_total is null"))? as i64,
+            parent_unresolved: parent_unresolved
+                .get(index)
+                .ok_or_else(|| anyhow!("parent_unresolved is null"))?
+                as i64,
+            unresolved_fraction: unresolved_fraction
+                .get(index)
+                .ok_or_else(|| anyhow!("unresolved_fraction is null"))?,
+            child_count: child_count
+                .get(index)
+                .ok_or_else(|| anyhow!("child_count is null"))?,
+            contribution: contribution
+                .get(index)
+                .ok_or_else(|| anyhow!("contribution is null"))?,
+        });
+    }
+
+    let transitive_utility = contributions
+        .iter()
+        .map(|contribution| contribution.contribution)
+        .sum();
+
+    Ok(UtilityStats {
+        material_key: material.clone(),
+        has_table: db.has_wdl_table(material)?,
+        has_pgn_index,
+        num_games,
+        material_key_size,
+        utility,
+        utility_rank: utility / material_key_size as f64,
+        transitive_utility,
+        transitive_utility_rank: transitive_utility / material_key_size as f64,
+        contributions,
+    })
+}
+
 fn load_material_keys_df(conn: &Connection) -> Result<DataFrame> {
     let mut stmt = conn.prepare(
         "SELECT name, children_json, total, unknown, win_or_draw, draw_or_loss, updated_at
@@ -229,6 +331,15 @@ fn load_pgn_index_df(conn: &Connection) -> Result<DataFrame> {
 }
 
 fn compute_transitive_utility_lf(material_lf: LazyFrame, pgn_lf: LazyFrame) -> LazyFrame {
+    compute_transitive_utility_contributions_lf(material_lf, pgn_lf)
+        .group_by([col("material_key")])
+        .agg([col("contribution").sum().alias("transitive_utility")])
+}
+
+fn compute_transitive_utility_contributions_lf(
+    material_lf: LazyFrame,
+    pgn_lf: LazyFrame,
+) -> LazyFrame {
     // Transitive utility propagates only one step into unsolved territory.
     // Each solved parent contributes:
     //
@@ -254,12 +365,22 @@ fn compute_transitive_utility_lf(material_lf: LazyFrame, pgn_lf: LazyFrame) -> L
             JoinArgs::new(JoinType::Left),
         )
         .filter(col("children_right").is_null())
-        .group_by([col("children")])
-        .agg([(col("utility") * (col("unresolved") / col("total"))
-            / col("child_count").cast(DataType::Float64))
-        .sum()
-        .alias("transitive_utility")])
-        .rename(["children"], ["material_key"])
+        .with_columns([
+            (col("unresolved") / col("total")).alias("unresolved_fraction"),
+            (col("utility") * (col("unresolved") / col("total"))
+                / col("child_count").cast(DataType::Float64))
+            .alias("contribution"),
+        ])
+        .select([
+            col("children").alias("material_key"),
+            col("name").alias("parent"),
+            col("utility").alias("parent_utility"),
+            col("total").alias("parent_total"),
+            col("unresolved").alias("parent_unresolved"),
+            col("unresolved_fraction"),
+            col("child_count"),
+            col("contribution"),
+        ])
 }
 
 fn compute_stale_material_keys_lf(material_lf: LazyFrame) -> LazyFrame {
@@ -289,12 +410,74 @@ fn compute_stale_material_keys_lf(material_lf: LazyFrame) -> LazyFrame {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_generation_targets;
-    use crate::storage::Database;
+    use super::{compute_generation_targets, compute_utility_stats};
+    use crate::material_key::MaterialKey;
+    use crate::storage::{Database, MaterialStatsRow, PgnIndexRow};
     use rusqlite::{Connection, params};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn explains_parent_transitive_utility_contribution() {
+        let db_path = temp_db_path("utility-contribution");
+        let mut db = Database::open_at(&db_path).unwrap();
+        db.upsert_material_stats(&MaterialStatsRow {
+            name: "KQvKR".to_string(),
+            children: vec!["KNvK".to_string()],
+            num_pieces: 5,
+            num_pawns: 0,
+            num_non_pawns: 5,
+            total: 100,
+            illegal: 0,
+            win: 70,
+            draw: 0,
+            loss: 0,
+            win_or_draw: 10,
+            draw_or_loss: 10,
+            unknown: 10,
+            updated_at: 1,
+        })
+        .unwrap();
+        db.replace_pgn_index(&[
+            PgnIndexRow {
+                material_key: "KQvKR".to_string(),
+                num_games: 10,
+                num_positions: 10,
+                total_games: 100,
+                total_positions: 100,
+                material_key_size: 100,
+                num_pieces: 5,
+                num_pawns: 0,
+                num_non_pawns: 5,
+                utility: 0.2,
+            },
+            PgnIndexRow {
+                material_key: "KNvK".to_string(),
+                num_games: 100,
+                num_positions: 90,
+                total_games: 100,
+                total_positions: 100,
+                material_key_size: 10,
+                num_pieces: 3,
+                num_pawns: 0,
+                num_non_pawns: 3,
+                utility: 0.9,
+            },
+        ])
+        .unwrap();
+
+        let material = MaterialKey::from_string("KNvK").unwrap();
+        let stats = compute_utility_stats(&db, &material).unwrap();
+        assert_eq!(stats.contributions.len(), 1);
+        assert_eq!(stats.contributions[0].parent, "KQvKR");
+        assert!((stats.contributions[0].unresolved_fraction - 0.3).abs() < 1e-12);
+        assert!((stats.transitive_utility - 0.06).abs() < 1e-12);
+        assert!((stats.transitive_utility_rank - 0.006).abs() < 1e-12);
+
+        drop(db);
+        fs::remove_file(&db_path).unwrap();
+    }
 
     #[test]
     fn prefers_stale_tables_over_unsolved_candidates() {

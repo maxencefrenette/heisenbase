@@ -3,6 +3,7 @@ mod frontier;
 mod material;
 mod summary;
 mod top;
+mod utility;
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
@@ -17,6 +18,8 @@ pub(crate) enum StatsCommands {
     Summary(summary::SummaryArgs),
     /// Show the top indexed material keys from the PGN index.
     Top(top::TopArgs),
+    /// Explain direct and transitive utility for one material key.
+    Utility(utility::UtilityArgs),
     /// Show detailed stats for a single material key.
     Material(material::MaterialArgs),
 }
@@ -37,6 +40,7 @@ pub(crate) fn run(args: StatsArgs) -> Result<()> {
         StatsCommands::Frontier(args) => frontier::run(args),
         StatsCommands::Summary(args) => summary::run(args),
         StatsCommands::Top(args) => top::run(args),
+        StatsCommands::Utility(args) => utility::run(args),
         StatsCommands::Material(args) => material::run(args),
     }
 }
