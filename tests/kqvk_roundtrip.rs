@@ -2,7 +2,7 @@
 use heisenbase::{
     material_key::MaterialKey,
     position_indexer::PositionIndexer,
-    wdl_file::{decode_wdl_bytes, encode_wdl_bytes},
+    wdl_codec::{decode_wdl_bytes, encode_wdl_bytes},
     wdl_score_range::WdlScoreRange,
     wdl_table::WdlTable,
 };

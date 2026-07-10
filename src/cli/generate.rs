@@ -8,7 +8,12 @@ use heisenbase::wdl_table::WdlTable;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn run_generate(material: MaterialKey) -> Result<()> {
-    let mut table_builder = TableBuilder::new(material);
+    let db = Database::open_default()?;
+    run_generate_with_db(material, &db)
+}
+
+fn run_generate_with_db(material: MaterialKey, db: &Database) -> Result<()> {
+    let mut table_builder = TableBuilder::new(material, db)?;
     let loaded: Vec<String> = table_builder
         .loaded_child_materials()
         .iter()
@@ -61,9 +66,8 @@ pub(crate) fn run_generate(material: MaterialKey) -> Result<()> {
         println!("{variant:?}: {percentage:.2}%");
     }
 
-    let db = Database::open_default()?;
     db.put_wdl_table(&wdl_table)?;
-    log_stats_to_index(&db, &wdl_table, &counts)?;
+    log_stats_to_index(db, &wdl_table, &counts)?;
     println!(
         "Stored table in {} for {}",
         storage::DB_PATH,
@@ -122,7 +126,7 @@ pub(crate) fn run_generate_many(min_games: u64, max_pieces: u32) -> Result<()> {
         } else {
             println!("Generating {}", target.material_key);
         }
-        run_generate(target.material_key)?;
+        run_generate_with_db(target.material_key, &db)?;
     }
 
     Ok(())

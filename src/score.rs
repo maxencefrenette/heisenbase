@@ -96,11 +96,16 @@ pub struct DtzScoreRange {
 }
 
 impl DtzScoreRange {
+    fn range(min: DtzScore, max: DtzScore) -> Self {
+        assert!(
+            min <= max,
+            "invalid DTZ score range: minimum {min:?} exceeds maximum {max:?}"
+        );
+        Self { min, max }
+    }
+
     pub fn unknown() -> Self {
-        Self {
-            min: DtzScore::immediate_loss(),
-            max: DtzScore::immediate_win(),
-        }
+        Self::range(DtzScore::immediate_loss(), DtzScore::immediate_win())
     }
 
     pub fn illegal() -> Self {
@@ -112,18 +117,12 @@ impl DtzScoreRange {
 
     /// A checkmate is on the board. The side to move is checkmated.
     pub fn checkmate() -> Self {
-        Self {
-            min: DtzScore::immediate_loss(),
-            max: DtzScore::immediate_loss(),
-        }
+        Self::range(DtzScore::immediate_loss(), DtzScore::immediate_loss())
     }
 
     /// Forced draw.
     pub fn draw() -> Self {
-        Self {
-            min: DtzScore::draw(),
-            max: DtzScore::draw(),
-        }
+        Self::range(DtzScore::draw(), DtzScore::draw())
     }
 
     pub fn is_certain(&self) -> bool {
@@ -143,9 +142,10 @@ impl DtzScoreRange {
     /// This is used to convert a score range from the perspective of the side to move to the
     /// perspective of the other side.
     pub fn flip(&self) -> Self {
-        Self {
-            min: -self.max,
-            max: -self.min,
+        if self.is_illegal() {
+            *self
+        } else {
+            Self::range(-self.max, -self.min)
         }
     }
 
@@ -153,18 +153,21 @@ impl DtzScoreRange {
         if self.is_illegal() {
             return *self;
         }
-        Self {
-            min: self.min.add_half_move(),
-            max: self.max.add_half_move(),
-        }
+        Self::range(self.min.add_half_move(), self.max.add_half_move())
     }
 
     /// Returns the bound-wise maximum of the two scores.
     pub fn max(&self, other: &Self) -> Self {
+        if self.is_illegal() {
+            return *other;
+        }
+        if other.is_illegal() {
+            return *self;
+        }
         let min = self.min.max(other.min);
         let max = self.max.max(other.max);
 
-        Self { min, max }
+        Self::range(min, max)
     }
 }
 
@@ -189,26 +192,13 @@ impl From<WdlScoreRange> for DtzScoreRange {
     fn from(value: WdlScoreRange) -> Self {
         match value {
             WdlScoreRange::Unknown => DtzScoreRange::unknown(),
-            WdlScoreRange::WinOrDraw => Self {
-                min: DtzScore::draw(),
-                max: DtzScore::immediate_win(),
-            },
-            WdlScoreRange::DrawOrLoss => Self {
-                min: DtzScore::immediate_loss(),
-                max: DtzScore::draw(),
-            },
-            WdlScoreRange::Win => Self {
-                min: DtzScore::immediate_win(),
-                max: DtzScore::immediate_win(),
-            },
-            WdlScoreRange::Draw => Self {
-                min: DtzScore::draw(),
-                max: DtzScore::draw(),
-            },
-            WdlScoreRange::Loss => Self {
-                min: DtzScore::immediate_loss(),
-                max: DtzScore::immediate_loss(),
-            },
+            WdlScoreRange::WinOrDraw => Self::range(DtzScore::draw(), DtzScore::immediate_win()),
+            WdlScoreRange::DrawOrLoss => Self::range(DtzScore::immediate_loss(), DtzScore::draw()),
+            WdlScoreRange::Win => Self::range(DtzScore::immediate_win(), DtzScore::immediate_win()),
+            WdlScoreRange::Draw => Self::range(DtzScore::draw(), DtzScore::draw()),
+            WdlScoreRange::Loss => {
+                Self::range(DtzScore::immediate_loss(), DtzScore::immediate_loss())
+            }
             WdlScoreRange::IllegalPosition => DtzScoreRange::illegal(),
         }
     }
@@ -220,36 +210,27 @@ mod tests {
 
     #[test]
     fn add_half_move_adjusts_bounds() {
-        let positive_range = DtzScoreRange {
-            min: DtzScore(5),
-            max: DtzScore(10),
-        };
-        let negative_range = DtzScoreRange {
-            min: DtzScore(-10),
-            max: DtzScore(-5),
-        };
-        let draw_range = DtzScoreRange {
-            min: DtzScore(0),
-            max: DtzScore(0),
-        };
+        let positive_range = DtzScoreRange::range(DtzScore(5), DtzScore(10));
+        let negative_range = DtzScoreRange::range(DtzScore(-10), DtzScore(-5));
+        let draw_range = DtzScoreRange::range(DtzScore(0), DtzScore(0));
         let illegal_range = DtzScoreRange::illegal();
 
         assert_eq!(
             positive_range.add_half_move(),
-            DtzScoreRange {
-                min: DtzScore(4),
-                max: DtzScore(9),
-            }
+            DtzScoreRange::range(DtzScore(4), DtzScore(9))
         );
         assert_eq!(
             negative_range.add_half_move(),
-            DtzScoreRange {
-                min: DtzScore(-9),
-                max: DtzScore(-4),
-            }
+            DtzScoreRange::range(DtzScore(-9), DtzScore(-4))
         );
         assert_eq!(draw_range.add_half_move(), draw_range);
         assert_eq!(illegal_range.add_half_move(), illegal_range);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid DTZ score range")]
+    fn rejects_reversed_range_at_construction() {
+        DtzScoreRange::range(DtzScore(1), DtzScore(0));
     }
 
     #[test]
@@ -259,45 +240,27 @@ mod tests {
         let cases = [
             (
                 Unknown,
-                DtzScoreRange {
-                    min: DtzScore::immediate_loss(),
-                    max: DtzScore::immediate_win(),
-                },
+                DtzScoreRange::range(DtzScore::immediate_loss(), DtzScore::immediate_win()),
             ),
             (
                 WinOrDraw,
-                DtzScoreRange {
-                    min: DtzScore::draw(),
-                    max: DtzScore::immediate_win(),
-                },
+                DtzScoreRange::range(DtzScore::draw(), DtzScore::immediate_win()),
             ),
             (
                 DrawOrLoss,
-                DtzScoreRange {
-                    min: DtzScore::immediate_loss(),
-                    max: DtzScore::draw(),
-                },
+                DtzScoreRange::range(DtzScore::immediate_loss(), DtzScore::draw()),
             ),
             (
                 Win,
-                DtzScoreRange {
-                    min: DtzScore::immediate_win(),
-                    max: DtzScore::immediate_win(),
-                },
+                DtzScoreRange::range(DtzScore::immediate_win(), DtzScore::immediate_win()),
             ),
             (
                 Draw,
-                DtzScoreRange {
-                    min: DtzScore::draw(),
-                    max: DtzScore::draw(),
-                },
+                DtzScoreRange::range(DtzScore::draw(), DtzScore::draw()),
             ),
             (
                 Loss,
-                DtzScoreRange {
-                    min: DtzScore::immediate_loss(),
-                    max: DtzScore::immediate_loss(),
-                },
+                DtzScoreRange::range(DtzScore::immediate_loss(), DtzScore::immediate_loss()),
             ),
             (IllegalPosition, DtzScoreRange::illegal()),
         ];

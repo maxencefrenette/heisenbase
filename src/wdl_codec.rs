@@ -77,7 +77,7 @@ mod tests {
     use crate::wdl_score_range::WdlScoreRange;
 
     #[test]
-    fn read_wdl_file_rejects_bad_magic() {
+    fn decode_wdl_bytes_rejects_bad_magic() {
         let result = decode_wdl_bytes(b"BAD!\0\0\0\0\0\0\0\0\0");
         assert!(matches!(
             result,

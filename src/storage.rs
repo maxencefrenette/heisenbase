@@ -5,7 +5,7 @@ use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::material_key::MaterialKey;
-use crate::wdl_file::{decode_wdl_bytes, encode_wdl_bytes};
+use crate::wdl_codec::{decode_wdl_bytes, encode_wdl_bytes};
 use crate::wdl_table::WdlTable;
 
 pub const DATA_DIR: &str = "./data";

@@ -4,6 +4,6 @@ pub mod position_indexer;
 pub mod score;
 pub mod storage;
 pub mod table_builder;
-pub mod wdl_file;
+pub mod wdl_codec;
 pub mod wdl_score_range;
 pub mod wdl_table;

@@ -3,11 +3,11 @@ use crate::position_indexer::{PositionIndexer, PositionMappingError};
 use crate::score::DtzScoreRange;
 use crate::storage::Database;
 use crate::wdl_score_range::WdlScoreRange;
+use anyhow::{Context, Result};
 use indicatif::{ParallelProgressIterator, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use shakmaty::{Chess, Move, Position, Role};
 use std::collections::HashMap;
-use std::path::Path;
 
 pub struct TableBuilder {
     pub(crate) material: MaterialKey,
@@ -20,33 +20,18 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
-    pub fn new(material: MaterialKey) -> Self {
-        Self::with_db_path(material, Path::new(crate::storage::DB_PATH))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_db_path<P: AsRef<Path>>(material: MaterialKey, db_path: P) -> Self {
-        Self::with_db_path(material, db_path.as_ref())
-    }
-
-    fn with_db_path(material: MaterialKey, db_path: &Path) -> Self {
+    pub fn new(material: MaterialKey, db: &Database) -> Result<Self> {
         let position_indexer = PositionIndexer::new(material.clone());
         let positions_len = position_indexer.total_positions();
         let mut child_tables = HashMap::new();
         let mut child_indexers = HashMap::new();
         let mut loaded_child_tables = Vec::new();
         let mut missing_child_tables = Vec::new();
-        let db = Database::open_at(db_path).unwrap_or_else(|err| {
-            panic!(
-                "failed to open sqlite database {}: {err}",
-                db_path.display()
-            )
-        });
 
         for child_key in material.child_material_keys() {
             let table = db
                 .get_wdl_table(&child_key)
-                .unwrap_or_else(|err| panic!("failed to load child table {child_key}: {err}"));
+                .with_context(|| format!("failed to load child table {child_key}"))?;
             match table {
                 Some(table) => {
                     child_tables.insert(child_key.clone(), table.positions);
@@ -61,7 +46,7 @@ impl TableBuilder {
             }
         }
 
-        Self {
+        Ok(Self {
             material,
             position_indexer,
             positions: vec![DtzScoreRange::unknown(); positions_len],
@@ -69,7 +54,7 @@ impl TableBuilder {
             child_indexers,
             loaded_child_tables,
             missing_child_tables,
-        }
+        })
     }
 
     pub fn solve(&mut self) {
@@ -230,7 +215,7 @@ mod tests {
     use shakmaty::{CastlingMode, Role, Square, fen::Fen};
     use std::collections::HashMap;
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     #[test]
     fn position_index_roundtrip() {
@@ -269,7 +254,8 @@ mod tests {
     fn terminal_positions_scored_in_first_step() {
         let material = MaterialKey::from_string("KQvK").unwrap();
         let db_path = temp_db_path("terminal_positions");
-        let mut tb = TableBuilder::new_with_db_path(material, &db_path);
+        let db = Database::open_at(&db_path).unwrap();
+        let mut tb = TableBuilder::new(material, &db).unwrap();
 
         // Mark all positions as draws so the step only evaluates the targets.
         tb.positions.fill(DtzScoreRange::draw());
@@ -305,7 +291,8 @@ mod tests {
     fn mate_in_one_scored_after_two_steps() {
         let material = MaterialKey::from_string("KQvK").unwrap();
         let db_path = temp_db_path("mate_in_one");
-        let mut tb = TableBuilder::new_with_db_path(material, &db_path);
+        let db = Database::open_at(&db_path).unwrap();
+        let mut tb = TableBuilder::new(material, &db).unwrap();
 
         // Pre-fill positions with draws so only relevant indices are processed.
         tb.positions.fill(DtzScoreRange::draw());
@@ -349,8 +336,7 @@ mod tests {
         path
     }
 
-    fn store_table(db_path: &Path, table: &WdlTable) {
-        let db = Database::open_at(db_path).unwrap();
+    fn store_table(db: &Database, table: &WdlTable) {
         db.put_wdl_table(table).unwrap();
     }
 
@@ -358,7 +344,8 @@ mod tests {
     fn child_tables_report_missing_when_unavailable() {
         let material = MaterialKey::from_string("KQvK").unwrap();
         let db_path = temp_db_path("missing_child");
-        let tb = TableBuilder::new_with_db_path(material, &db_path);
+        let db = Database::open_at(&db_path).unwrap();
+        let tb = TableBuilder::new(material, &db).unwrap();
         assert!(tb.loaded_child_materials().is_empty());
         let missing: Vec<String> = tb
             .missing_child_materials()
@@ -373,6 +360,7 @@ mod tests {
     fn child_tables_load_available_files() {
         let material = MaterialKey::from_string("KQvK").unwrap();
         let db_path = temp_db_path("load_child");
+        let db = Database::open_at(&db_path).unwrap();
 
         let child_key = MaterialKey::from_string("KvK").unwrap();
         let child_indexer = PositionIndexer::new(child_key.clone());
@@ -381,9 +369,9 @@ mod tests {
             material: child_key,
             positions,
         };
-        store_table(&db_path, &kvk_wdl_table);
+        store_table(&db, &kvk_wdl_table);
 
-        let tb = TableBuilder::new_with_db_path(material, &db_path);
+        let tb = TableBuilder::new(material, &db).unwrap();
         let loaded: Vec<String> = tb
             .loaded_child_materials()
             .iter()
@@ -400,6 +388,7 @@ mod tests {
     fn pawn_move_uses_child_table() {
         let material = MaterialKey::from_string("Ka2vK").unwrap();
         let db_path = temp_db_path("pawn_move_child");
+        let db = Database::open_at(&db_path).unwrap();
 
         let child_key = MaterialKey::from_string("Ka3vK").unwrap();
         let child_indexer = PositionIndexer::new(child_key.clone());
@@ -408,9 +397,9 @@ mod tests {
             material: child_key,
             positions,
         };
-        store_table(&db_path, &child_table);
+        store_table(&db, &child_table);
 
-        let tb = TableBuilder::new_with_db_path(material, &db_path);
+        let tb = TableBuilder::new(material, &db).unwrap();
 
         let position: Chess = "8/8/8/8/8/8/P7/K6k w - - 0 1"
             .parse::<Fen>()
