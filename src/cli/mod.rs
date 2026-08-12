@@ -37,6 +37,9 @@ enum Commands {
         /// Maximum total number of pieces allowed.
         #[arg(long, required = true)]
         max_pieces: u32,
+        /// Stop once the database contains at least this many tablebase positions.
+        #[arg(long)]
+        target_positions: Option<u64>,
     },
     /// Build the PGN index from fishtest PGN files.
     #[command(
@@ -78,8 +81,9 @@ pub fn run() -> Result<()> {
         Commands::GenerateMany {
             min_games,
             max_pieces,
+            target_positions,
         } => {
-            generate::run_generate_many(min_games, max_pieces)?;
+            generate::run_generate_many(min_games, max_pieces, target_positions)?;
         }
         Commands::PgnIndex(args) => {
             if args.stage1_only {
@@ -142,6 +146,7 @@ mod tests {
             Commands::GenerateMany {
                 min_games: 100,
                 max_pieces: 4,
+                target_positions: None,
             }
             .is_long_running()
         );

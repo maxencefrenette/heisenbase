@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Args;
-use heisenbase::generation_targets::compute_generation_targets;
+use heisenbase::generation_targets::{alternate_generation_targets, compute_generation_targets};
 use heisenbase::storage::Database;
 
 #[derive(Args)]
@@ -22,11 +22,15 @@ pub(crate) struct FrontierArgs {
 
 pub(crate) fn run(args: FrontierArgs) -> Result<()> {
     let db = Database::open_default()?;
-    let targets = compute_generation_targets(&db, args.min_games, args.max_pieces)?;
+    let targets = alternate_generation_targets(
+        compute_generation_targets(&db, args.min_games, args.max_pieces)?,
+        false,
+    );
 
     println!("limit: {}", args.limit);
     println!("min_games: {}", args.min_games);
     println!("max_pieces: {}", args.max_pieces);
+    println!("policy: alternate_new_stale");
     println!(
         "material_key\taction\tis_stale\tnum_games\tmaterial_key_size\tutility\tutility_rank\ttransitive_utility\ttransitive_utility_rank"
     );

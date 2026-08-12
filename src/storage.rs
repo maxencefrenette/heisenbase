@@ -141,6 +141,15 @@ impl Database {
         Ok(keys)
     }
 
+    pub fn total_table_positions(&self) -> Result<u64> {
+        let total: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(total), 0) FROM material_keys",
+            [],
+            |row| row.get(0),
+        )?;
+        u64::try_from(total).context("total table positions cannot be negative")
+    }
+
     pub fn upsert_material_stats(&self, row: &MaterialStatsRow) -> Result<()> {
         let children_json = serde_json::to_string(&row.children)?;
         self.conn.execute(

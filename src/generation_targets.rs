@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use polars::prelude::*;
 use rusqlite::Connection;
+use std::collections::VecDeque;
 
 use crate::material_key::MaterialKey;
 use crate::position_indexer::PositionIndexer;
@@ -10,6 +11,7 @@ use crate::storage::Database;
 pub struct GenerationTarget {
     pub material_key: MaterialKey,
     pub is_stale: bool,
+    pub max_child_updated_at: i64,
     pub num_games: i64,
     pub material_key_size: i64,
     pub utility: f64,
@@ -41,6 +43,30 @@ pub struct TransitiveUtilityContribution {
     pub unresolved_fraction: f64,
     pub child_count: i64,
     pub contribution: f64,
+}
+
+/// Interleave unsolved and stale targets while preserving each group's ranking.
+pub fn alternate_generation_targets(
+    targets: Vec<GenerationTarget>,
+    stale_first: bool,
+) -> Vec<GenerationTarget> {
+    let (mut stale, mut unsolved): (VecDeque<_>, VecDeque<_>) =
+        targets.into_iter().partition(|target| target.is_stale);
+    let mut prefer_stale = stale_first;
+    let mut ordered = Vec::with_capacity(stale.len() + unsolved.len());
+
+    while !stale.is_empty() || !unsolved.is_empty() {
+        let next = if prefer_stale {
+            stale.pop_front().or_else(|| unsolved.pop_front())
+        } else {
+            unsolved.pop_front().or_else(|| stale.pop_front())
+        };
+        let target = next.expect("at least one target queue is non-empty");
+        prefer_stale = !target.is_stale;
+        ordered.push(target);
+    }
+
+    ordered
 }
 
 pub fn compute_generation_targets(
@@ -95,6 +121,7 @@ pub fn compute_generation_targets(
             col("transitive_utility").fill_null(lit(0.0)),
             col("updated_at").is_not_null().alias("has_table"),
             col("is_stale").fill_null(lit(false)),
+            col("max_child_updated_at").fill_null(lit(0_i64)),
         ])
         .with_columns([
             (col("utility") / col("material_key_size").cast(DataType::Float64))
@@ -116,6 +143,7 @@ pub fn compute_generation_targets(
 
     let keys = sorted.column("material_key")?.str()?;
     let stale = sorted.column("is_stale")?.bool()?;
+    let max_child_updated_at = sorted.column("max_child_updated_at")?.i64()?;
     let solved = sorted.column("has_table")?.bool()?;
     let num_games = sorted.column("num_games")?.i64()?;
     let material_key_size = sorted.column("material_key_size")?.i64()?;
@@ -142,6 +170,9 @@ pub fn compute_generation_targets(
         candidates.push(GenerationTarget {
             material_key,
             is_stale,
+            max_child_updated_at: max_child_updated_at
+                .get(index)
+                .ok_or_else(|| anyhow!("max_child_updated_at is null"))?,
             num_games: num_games
                 .get(index)
                 .ok_or_else(|| anyhow!("num_games is null"))?,
@@ -405,12 +436,16 @@ fn compute_stale_material_keys_lf(material_lf: LazyFrame) -> LazyFrame {
         .with_columns([col("max_child_updated_at")
             .gt(col("updated_at"))
             .alias("is_stale")])
-        .select([col("name").alias("material_key"), col("is_stale")])
+        .select([
+            col("name").alias("material_key"),
+            col("is_stale"),
+            col("max_child_updated_at"),
+        ])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_generation_targets, compute_utility_stats};
+    use super::{alternate_generation_targets, compute_generation_targets, compute_utility_stats};
     use crate::material_key::MaterialKey;
     use crate::storage::{Database, MaterialStatsRow, PgnIndexRow};
     use rusqlite::{Connection, params};
@@ -595,6 +630,14 @@ mod tests {
             .expect("expected a generation target");
         assert_eq!(target.material_key.to_string(), "KQvKR");
         assert!(target.is_stale);
+        assert_eq!(target.max_child_updated_at, 20);
+
+        let targets = compute_generation_targets(&db, 1, 5).unwrap();
+        let alternating = alternate_generation_targets(targets, false);
+        assert_eq!(alternating[0].material_key.to_string(), "KNvK");
+        assert!(!alternating[0].is_stale);
+        assert_eq!(alternating[1].material_key.to_string(), "KQvKR");
+        assert!(alternating[1].is_stale);
 
         fs::remove_file(&db_path).unwrap();
     }
